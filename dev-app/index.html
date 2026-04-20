@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stunning Algorithm Workbench</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #1a1a2e;
+      --surface:   #16213e;
+      --surface2:  #0f3460;
+      --accent:    #e94560;
+      --accent2:   #2196F3;
+      --text:      #e0e0e0;
+      --text-dim:  #8a8a9a;
+      --border:    #2a2a4e;
+      --ok:        #4caf50;
+      --warn:      #ff9800;
+      --fail:      #f44336;
+      --radius:    6px;
+      --sidebar-w: 240px;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ---- Header ---- */
+    header {
+      background: var(--surface2);
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    header h1 { font-size: 14px; font-weight: 600; letter-spacing: 0.03em; }
+    header .subtitle { color: var(--text-dim); font-size: 11px; }
+
+    /* ---- Main layout ---- */
+    .workspace {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ---- Sidebar ---- */
+    aside {
+      width: var(--sidebar-w);
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+
+    .panel {
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .panel-title {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 10px;
+    }
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-bottom: 8px;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+    label span { color: var(--text); font-size: 12px; }
+
+    input[type="number"], select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 5px 8px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      width: 100%;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input[type="number"]:focus, select:focus {
+      border-color: var(--accent2);
+    }
+    select option { background: var(--surface); }
+
+    /* ---- Action buttons ---- */
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 7px 10px;
+      margin-bottom: 6px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 12px;
+      text-align: center;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: #1a3a5c; }
+    .btn:last-child { margin-bottom: 0; }
+
+    /* ---- Result panel ---- */
+    #result-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      background: var(--surface2);
+      color: var(--text-dim);
+    }
+    #result-badge.ok   { background: var(--ok);   color: #fff; }
+    #result-badge.warn { background: var(--warn);  color: #fff; }
+    #result-badge.fail { background: var(--fail);  color: #fff; }
+
+    .zone-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      margin-bottom: 3px;
+      color: var(--text-dim);
+    }
+    .zone-row span:last-child { color: var(--text); font-variant-numeric: tabular-nums; }
+
+    #violations {
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .violation {
+      font-size: 10px;
+      line-height: 1.4;
+      padding: 4px 6px;
+      border-radius: 4px;
+      border-left: 3px solid var(--warn);
+      background: rgba(255,152,0,0.08);
+      color: var(--text);
+    }
+    .violation.error {
+      border-left-color: var(--fail);
+      background: rgba(244,67,54,0.08);
+    }
+
+    /* ---- Chart area ---- */
+    .chart-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 12px;
+      gap: 8px;
+    }
+
+    .chart-wrap {
+      flex: 1;
+      position: relative;
+      min-height: 0;
+    }
+
+    .chart-hint {
+      font-size: 10px;
+      color: var(--text-dim);
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Stunning Algorithm Workbench</h1>
+    <span class="subtitle">Click chart to add samples · Drag to move · Right-click to delete</span>
+  </header>
+
+  <div class="workspace">
+    <aside>
+      <!-- Profile -->
+      <div class="panel">
+        <div class="panel-title">Profile</div>
+        <label>
+          <span>Setpoint (mA)</span>
+          <input type="number" id="setpoint" value="500" min="0" max="5000" step="10" />
+        </label>
+        <label>
+          <span>Nominal (mA)</span>
+          <input type="number" id="nominal" value="400" min="0" max="5000" step="10" />
+        </label>
+        <label>
+          <span>Duration (s)</span>
+          <input type="number" id="duration" value="3.0" min="0.1" max="30" step="0.1" />
+        </label>
+      </div>
+
+      <!-- Algorithm -->
+      <div class="panel">
+        <div class="panel-title">Algorithm</div>
+        <label>
+          <span>Active algorithm</span>
+          <select id="algo-select"></select>
+        </label>
+      </div>
+
+      <!-- Actions -->
+      <div class="panel">
+        <div class="panel-title">Samples</div>
+        <button class="btn" id="btn-reset">Reset to default</button>
+        <button class="btn" id="btn-clear">Clear all</button>
+      </div>
+
+      <!-- Results -->
+      <div class="panel" style="flex:1">
+        <div class="panel-title">Result</div>
+        <div id="result-badge">—</div>
+        <div id="zone-times"></div>
+        <div id="violations"></div>
+      </div>
+    </aside>
+
+    <!-- Chart -->
+    <div class="chart-area">
+      <div class="chart-wrap">
+        <canvas id="dev-chart"></canvas>
+      </div>
+      <div class="chart-hint">
+        Left-click: add point &nbsp;|&nbsp; Drag: move point &nbsp;|&nbsp; Right-click: delete point
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
