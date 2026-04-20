@@ -50,7 +50,7 @@ const DEFAULT_SAMPLES = [
 
 const state = {
   profile: { ...DEFAULT_PROFILE },
-  algoId:  spec1.algorithm_id
+  algoId:  String(spec1.algorithm_id)   // always string; matches elAlgo.value and SPECS key coercion
 };
 
 // ---- DOM refs ----------------------------------------------------------
@@ -74,7 +74,7 @@ for (const spec of Object.values(SPECS)) {
   opt.textContent = spec.display_name ?? `Algorithm ${spec.algorithm_id}`;
   elAlgo.appendChild(opt);
 }
-elAlgo.value = state.algoId;
+elAlgo.value = String(state.algoId);
 
 // ---- Build logEntry from profile + samples -----------------------------
 
@@ -204,14 +204,9 @@ const chart = new Chart(canvas, {
   }
 });
 
-// Resize canvas to fill container
-function resizeChart() {
-  const wrap = canvas.parentElement;
-  canvas.style.width  = wrap.clientWidth  + 'px';
-  canvas.style.height = wrap.clientHeight + 'px';
-}
-window.addEventListener('resize', () => { resizeChart(); chart.resize(); });
-resizeChart();
+// Chart.js handles canvas sizing via responsive:true / maintainAspectRatio:false.
+// The chart-wrap container drives the size through CSS flex layout.
+window.addEventListener('resize', () => chart.resize());
 
 // ---- Profile input handlers --------------------------------------------
 
@@ -227,9 +222,7 @@ elNominal.addEventListener('input',  syncProfile);
 elDuration.addEventListener('input', syncProfile);
 
 elAlgo.addEventListener('change', () => {
-  state.algoId = elAlgo.value === String(parseInt(elAlgo.value, 10))
-    ? parseInt(elAlgo.value, 10)
-    : elAlgo.value;
+  state.algoId = elAlgo.value;
   reEvaluate();
 });
 

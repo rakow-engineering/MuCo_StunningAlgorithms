@@ -23,12 +23,12 @@ export function createSampleEditorPlugin(onChanged) {
   // ---- Coordinate helpers ------------------------------------------------
 
   function canvasPos(canvas, event) {
-    const rect   = canvas.getBoundingClientRect();
-    const scaleX = canvas.width  / rect.width;
-    const scaleY = canvas.height / rect.height;
+    // Chart.js scale methods (getValueForPixel / getPixelForValue) operate in
+    // CSS pixel space — do NOT multiply by devicePixelRatio here.
+    const rect = canvas.getBoundingClientRect();
     return {
-      x: (event.clientX - rect.left) * scaleX,
-      y: (event.clientY - rect.top)  * scaleY
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
     };
   }
 
