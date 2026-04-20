@@ -87,11 +87,24 @@ function buildLogEntry(samples) {
   };
 }
 
+// ---- Axis bounds -------------------------------------------------------
+// X max = at least 2× profile duration; expands further if a point lies beyond.
+// This also acts as the hard right boundary for drag clamping (chartArea.right).
+
+function updateAxisBounds() {
+  const data    = chart.data.datasets[0].data;
+  const maxPtX  = data.length > 0 ? Math.max(...data.map(p => p.x)) : 0;
+  const xMax    = Math.max(2 * state.profile.duration_s, maxPtX);
+  chart.options.scales.x.max = xMax;
+}
+
 // ---- Re-evaluate and update UI -----------------------------------------
 
 function reEvaluate() {
   const spec    = SPECS[state.algoId];
   const samples = chart.data.datasets[0].data;
+
+  updateAxisBounds();
 
   if (!spec || samples.length < 2) {
     evaluationOverlayPlugin.setEvaluationData('dev-chart', null);
@@ -190,6 +203,7 @@ const chart = new Chart(canvas, {
         type:  'linear',
         title: { display: true, text: 'Time (s)', color: '#8a8a9a' },
         min:   0,
+        max:   DEFAULT_PROFILE.duration_s * 2,   // updated dynamically by updateAxisBounds()
         grid:  { color: 'rgba(255,255,255,0.06)' },
         ticks: { color: '#8a8a9a' }
       },
