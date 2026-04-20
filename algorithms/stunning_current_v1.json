@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "algorithm_id": 2,
+  "display_name": "Standard: Rampe, Schwellen nominal/setpoint, Mindestdauer",
+  "description": "Klassische Auswertung: Anstieg auf setpoint_mA in 1s, dann dauerhaft >= nominal_mA (rot) / >= setpoint_mA (gelb), Mindest-Betäubungszeit über nominal_mA.",
+  "bindings": {
+    "series": "current_mA",
+    "nominal_mA": "default_current_mA",
+    "setpoint_mA": "current_mA",
+    "required_duration_s": "time_s"
+  },
+  "timebase": "relative_s_from_Time_ms",
+  "steps": [
+    {
+      "id": "glitch_merge",
+      "op": "merge_below_ms",
+      "ref": "nominal_mA",
+      "max_gap_ms": 100
+    },
+    {
+      "id": "ramp",
+      "op": "ramp_to_threshold",
+      "threshold": "setpoint_mA",
+      "current_threshold_percent": 100,
+      "within_s": 1,
+      "ramp_start_mA": 10,
+      "count_during_ramp": false
+    },
+    {
+      "id": "sustain",
+      "op": "sustain_thresholds",
+      "after": "after_ramp",
+      "warn_below": "setpoint_mA",
+      "warn_below_threshold_percent": 100,
+      "fail_below": "nominal_mA",
+      "fail_below_threshold_percent": 100
+    },
+    {
+      "id": "duration",
+      "op": "min_duration_above",
+      "threshold": "nominal_mA",
+      "duration_from": "required_duration_s"
+    },
+    {
+      "id": "invalid_check",
+      "op": "invalid_timeout",
+      "max_invalid_s": 0.5
+    },
+    {
+      "id": "total_check",
+      "op": "total_timeout",
+      "duration_from": "required_duration_s",
+      "factor": 3.0
+    }
+  ]
+}

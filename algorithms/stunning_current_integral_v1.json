@@ -1,0 +1,60 @@
+{
+  "schema_version": "1.0",
+  "algorithm_id": 3,
+  "display_name": "Integral: Rampe, Schwellen nominal/setpoint, Strom-Zeit-Integral",
+  "description": "Wie Standard, aber statt reiner Mindestdauer wird das Strom-Zeit-Integral (mA·s) bewertet. Strom wird auf setpoint_mA begrenzt; unterhalb 70 % dieser Grenze wird nicht integriert. Ziel: Integral >= required_duration_s × setpoint_mA.",
+  "bindings": {
+    "series": "current_mA",
+    "nominal_mA": "default_current_mA",
+    "setpoint_mA": "current_mA",
+    "required_duration_s": "time_s"
+  },
+  "timebase": "relative_s_from_Time_ms",
+  "steps": [
+    {
+      "id": "glitch_merge",
+      "op": "merge_below_ms",
+      "ref": "nominal_mA",
+      "max_gap_ms": 200
+    },
+    {
+      "id": "ramp",
+      "op": "ramp_to_threshold",
+      "threshold": "setpoint_mA",
+      "current_threshold_percent": 70,
+      "within_s": 1,
+      "ramp_start_mA": 0.2,
+      "count_during_ramp": true
+    },
+    {
+      "id": "sustain",
+      "op": "sustain_thresholds",
+      "after": "after_ramp",
+      "warn_below": "setpoint_mA",
+      "warn_below_threshold_percent": 70,
+      "fail_below": "nominal_mA",
+      "fail_below_threshold_percent": null
+    },
+    {
+      "id": "charge_ok",
+      "op": "charge_integral",
+      "limit_to": "setpoint_mA",
+      "current_threshold_percent": 70,
+      "target": {
+        "duration_from": "required_duration_s",
+        "current_from": "setpoint_mA"
+      }
+    },
+    {
+      "id": "invalid_check",
+      "op": "invalid_timeout",
+      "max_invalid_s": 0.5
+    },
+    {
+      "id": "total_check",
+      "op": "total_timeout",
+      "duration_from": "required_duration_s",
+      "factor": 3.0
+    }
+  ]
+}
