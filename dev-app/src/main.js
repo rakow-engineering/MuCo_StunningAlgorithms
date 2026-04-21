@@ -70,6 +70,7 @@ const elAlgo       = document.getElementById('algo-select');
 const elBadge      = document.getElementById('result-badge');
 const elZoneTimes  = document.getElementById('zone-times');
 const elViolations = document.getElementById('violations');
+const elShowProgress = document.getElementById('show-progress');
 const elBtnReset   = document.getElementById('btn-reset');
 const elBtnCopy    = document.getElementById('btn-copy');
 const elBtnClear   = document.getElementById('btn-clear');
@@ -140,6 +141,10 @@ function reEvaluate() {
   }
 
   const result = evaluate(buildLogEntry(samples), spec);
+  if (!elShowProgress.checked && result.overlayHints) {
+    result.overlayHints.durationSeries = null;
+    result.overlayHints.integralSeries = null;
+  }
   evaluationOverlayPlugin.setEvaluationData('dev-chart', result);
   chart.update();
   renderResults(result);
@@ -215,6 +220,7 @@ const chart = new Chart(canvas, {
     responsive:          true,
     maintainAspectRatio: false,
     animation:           false,
+    layout: { padding: { right: 46 } },
     plugins: {
       legend: { display: false },
       tooltip: {
@@ -266,6 +272,8 @@ elAlgo.addEventListener('change', () => {
   state.algoId = elAlgo.value;
   reEvaluate();
 });
+
+elShowProgress.addEventListener('change', reEvaluate);
 
 // ---- Action buttons ----------------------------------------------------
 
