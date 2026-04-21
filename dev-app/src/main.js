@@ -18,6 +18,9 @@ import spec1 from '@algo/algorithms/stunning_embedded_v10.json';
 import spec2 from '@algo/algorithms/stunning_current_v1.json';
 import spec3 from '@algo/algorithms/stunning_current_integral_v1.json';
 
+import logoRakow       from '@algo/assets/RakowEnineering Logo.png';
+import logoFederleicht from '@algo/assets/federleicht-logo-4c_mittel.png';
+
 // ---- Algorithm registry ------------------------------------------------
 
 const SPECS = {
@@ -34,19 +37,24 @@ const DEFAULT_PROFILE = {
   duration_s:  3.0
 };
 
-// A realistic stunning waveform: ramp up, sustain above setpoint, then stop
-const DEFAULT_SAMPLES = [
-  { x: 0.0, y:   0 },
-  { x: 0.2, y:  50 },
-  { x: 0.5, y: 250 },
-  { x: 0.8, y: 460 },
-  { x: 1.0, y: 505 },
-  { x: 1.5, y: 512 },
-  { x: 2.0, y: 498 },
-  { x: 2.5, y: 508 },
-  { x: 3.2, y: 502 },
-  { x: 3.8, y:  20 },
+// Waveform template as fractions of setpoint_mA: ramp up, sustain above setpoint, then stop.
+// Y values are multiplied by the current setpoint when building the actual sample points.
+const SAMPLE_TEMPLATE = [
+  { x: 0.0, f: 0.000 },
+  { x: 0.2, f: 0.100 },
+  { x: 0.5, f: 0.500 },
+  { x: 0.8, f: 0.920 },
+  { x: 1.0, f: 1.010 },
+  { x: 1.5, f: 1.024 },
+  { x: 2.0, f: 0.996 },
+  { x: 2.5, f: 1.016 },
+  { x: 3.2, f: 1.004 },
+  { x: 3.8, f: 0.040 },
 ];
+
+function buildDefaultSamples(setpoint_mA) {
+  return SAMPLE_TEMPLATE.map(p => ({ x: p.x, y: Math.round(p.f * setpoint_mA) }));
+}
 
 const state = {
   profile: { ...DEFAULT_PROFILE },
@@ -63,8 +71,26 @@ const elBadge      = document.getElementById('result-badge');
 const elZoneTimes  = document.getElementById('zone-times');
 const elViolations = document.getElementById('violations');
 const elBtnReset   = document.getElementById('btn-reset');
+const elBtnCopy    = document.getElementById('btn-copy');
 const elBtnClear   = document.getElementById('btn-clear');
 const canvas       = document.getElementById('dev-chart');
+
+// ---- Header logos -------------------------------------------------------
+
+const header = document.querySelector('header');
+const h1     = header.querySelector('h1');
+
+function makeHeaderLogo(src, alt, extraStyle = '') {
+  const img = document.createElement('img');
+  img.src   = src;
+  img.alt   = alt;
+  img.style.cssText = `height:28px; width:auto; display:block; flex-shrink:0; ${extraStyle}`;
+  return img;
+}
+
+header.insertBefore(makeHeaderLogo(logoRakow, 'Rakow Engineering'), h1);
+header.insertBefore(makeHeaderLogo(logoFederleicht, 'FederLeicht',
+  'background:#fff; border-radius:4px; padding:2px 6px;'), h1);
 
 // ---- Populate algo dropdown --------------------------------------------
 
@@ -92,10 +118,10 @@ function buildLogEntry(samples) {
 // This also acts as the hard right boundary for drag clamping (chartArea.right).
 
 function updateAxisBounds() {
-  const data    = chart.data.datasets[0].data;
-  const maxPtX  = data.length > 0 ? Math.max(...data.map(p => p.x)) : 0;
-  const xMax    = Math.max(2 * state.profile.duration_s, maxPtX);
-  chart.options.scales.x.max = xMax;
+  const data   = chart.data.datasets[0].data;
+  const maxPtX = data.length > 0 ? Math.max(...data.map(p => p.x)) : 0;
+  chart.options.scales.x.max = Math.max(2 * state.profile.duration_s, maxPtX);
+  chart.options.scales.y.max = Math.round(state.profile.setpoint_mA * 1.3);
 }
 
 // ---- Re-evaluate and update UI -----------------------------------------
@@ -156,7 +182,7 @@ function renderResults(result) {
     ? ''
     : shown.map(v => `
         <div class="violation ${v.severity === 'error' ? 'error' : ''}">
-          ${evaluationOverlayPlugin.formatViolation(v)}
+          ${v.stepType ? `<span class="violation-category">${v.stepType}</span><br>` : ''}${evaluationOverlayPlugin.formatViolation(v)}
         </div>
       `).join('');
 }
@@ -175,10 +201,10 @@ const chart = new Chart(canvas, {
   data: {
     datasets: [{
       label: 'Current (mA)',
-      data: DEFAULT_SAMPLES.map(p => ({ x: p.x, y: p.y })),
+      data: buildDefaultSamples(DEFAULT_PROFILE.setpoint_mA),
       showLine:         true,
-      borderColor:      'rgba(33, 150, 243, 0.9)',
-      backgroundColor:  'rgba(33, 150, 243, 0.7)',
+      borderColor:      'rgba(220, 53, 69, 0.9)',
+      backgroundColor:  'rgba(220, 53, 69, 0.7)',
       borderWidth:      2,
       pointRadius:      5,
       pointHoverRadius: 7,
@@ -211,6 +237,7 @@ const chart = new Chart(canvas, {
         type:  'linear',
         title: { display: true, text: 'Current (mA)', color: '#8a8a9a' },
         min:   0,
+        max:   Math.round(DEFAULT_PROFILE.setpoint_mA * 1.3),
         grid:  { color: 'rgba(255,255,255,0.06)' },
         ticks: { color: '#8a8a9a' }
       }
@@ -243,7 +270,44 @@ elAlgo.addEventListener('change', () => {
 // ---- Action buttons ----------------------------------------------------
 
 elBtnReset.addEventListener('click', () => {
-  chart.data.datasets[0].data = DEFAULT_SAMPLES.map(p => ({ x: p.x, y: p.y }));
+  chart.data.datasets[0].data = buildDefaultSamples(state.profile.setpoint_mA);
+  chart.update('none');
+  reEvaluate();
+});
+
+// ---- Clipboard helpers -------------------------------------------------
+
+function samplesFromClipboardText(text) {
+  try {
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed) || parsed.length < 2) return null;
+    if (!parsed.every(p => typeof p.x === 'number' && typeof p.y === 'number')) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+elBtnCopy.addEventListener('click', () => {
+  const samples = chart.data.datasets[0].data;
+  const text = JSON.stringify(samples.map(p => ({ x: p.x, y: p.y })), null, 2);
+  navigator.clipboard.writeText(text).then(() => {
+    const prev = elBtnCopy.textContent;
+    elBtnCopy.textContent = 'Copied!';
+    setTimeout(() => { elBtnCopy.textContent = prev; }, 1200);
+  });
+});
+
+document.addEventListener('keydown', async (e) => {
+  if (!e.ctrlKey || e.key !== 'v') return;
+  // Don't intercept paste into text inputs
+  if (document.activeElement?.matches('input, select, textarea')) return;
+  e.preventDefault();
+  const text = await navigator.clipboard.readText().catch(() => null);
+  if (!text) return;
+  const samples = samplesFromClipboardText(text);
+  if (!samples) return;
+  chart.data.datasets[0].data = samples;
   chart.update('none');
   reEvaluate();
 });

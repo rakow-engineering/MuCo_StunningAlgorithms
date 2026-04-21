@@ -27,6 +27,8 @@ const COLORS = {
   rampReached: 'rgba(76, 175, 80, 0.7)',
   integralCutoff: 'rgba(156, 39, 176, 0.7)',
   integralBand: 'rgba(33, 150, 243, 0.10)',
+  integralLine: 'rgba(156, 39, 176, 0.85)',
+  integralAxis: 'rgba(156, 39, 176, 0.55)',
   completionLine: 'rgba(76, 175, 80, 0.8)',
   completionBand: 'rgba(76, 175, 80, 0.08)',
   badgeOk: 'rgba(76, 175, 80, 0.9)',
@@ -192,6 +194,64 @@ function formatViolation(v) {
 }
 
 // ---------------------------------------------------------------------------
+// Integral progress line + right-side % axis
+// ---------------------------------------------------------------------------
+
+function drawIntegralProgress(ctx, series, chartArea, xScale) {
+  if (!series || series.length === 0) return;
+
+  const chartH = chartArea.bottom - chartArea.top;
+  const axisX = chartArea.right + 1;
+  const tickLen = 4;
+  const pctToY = pct => chartArea.bottom - (pct / 100) * chartH;
+
+  // Right axis line + ticks + labels
+  ctx.save();
+  ctx.strokeStyle = COLORS.integralAxis;
+  ctx.fillStyle = COLORS.integralAxis;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([]);
+  ctx.font = '9px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+
+  ctx.beginPath();
+  ctx.moveTo(axisX, chartArea.top);
+  ctx.lineTo(axisX, chartArea.bottom);
+  ctx.stroke();
+
+  for (const pct of [0, 25, 50, 75, 100]) {
+    const y = pctToY(pct);
+    ctx.beginPath();
+    ctx.moveTo(axisX, y);
+    ctx.lineTo(axisX + tickLen, y);
+    ctx.stroke();
+    ctx.fillText(`${pct}%`, axisX + tickLen + 2, y);
+  }
+  ctx.restore();
+
+  // Progress line (clipped to chart area)
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top);
+  ctx.clip();
+
+  ctx.strokeStyle = COLORS.integralLine;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  let started = false;
+  for (const pt of series) {
+    const x = xScale.getPixelForValue(pt.t);
+    const y = pctToY(pt.pct);
+    if (!started) { ctx.moveTo(x, y); started = true; }
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
 
@@ -257,7 +317,12 @@ const evaluationOverlayPlugin = {
       }
     }
 
-    // 2. Violation bands + markers (skip isSummary)
+    // 2. Integral progress line + right % axis (charge_integral algorithms)
+    if (hints.integralSeries?.length > 0) {
+      drawIntegralProgress(ctx, hints.integralSeries, chartArea, xScale);
+    }
+
+    // 3. Violation bands + markers (skip isSummary)
     for (const v of (violations || [])) {
       if (v.isSummary) continue;
 

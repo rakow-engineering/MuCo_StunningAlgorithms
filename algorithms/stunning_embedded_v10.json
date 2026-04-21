@@ -19,9 +19,10 @@
     {
       "id":   "ramp",
       "op":   "ramp_to_threshold",
+      "type": "startup",
       "threshold":                 "setpoint_mA",
       "current_threshold_percent": 100,
-      "within_s":                  1,
+      "timeout_ms":                1000,
       "ramp_start_mA":             0,
       "count_during_ramp":         false,
       "_note": "Näherung: StunningResult.c startet das 1s-Fenster bei setup()-Aufruf (total_elapsed_ms-Zähler), nicht bei I>0. DELAY_AFTER_HV_RELAIS_MODE_CHANGE_ms ist in diesem Spec nicht abgebildet. Ramp-Fail-Flag wird gesetzt, hat aber im C-Code keinen eigenen Fehlerpfad — die Auswertung läuft weiter."
@@ -29,6 +30,7 @@
     {
       "id":   "sustain",
       "op":   "sustain_thresholds",
+      "type": "monitor",
       "after": "after_ramp",
       "warn_below":                    "setpoint_mA",
       "warn_below_threshold_percent":  100,
@@ -39,6 +41,7 @@
     {
       "id":        "duration",
       "op":        "min_duration_above",
+      "type":      "completion",
       "threshold":     "nominal_mA",
       "duration_from": "required_duration_s",
       "_note": "Entspricht stunning_elapsed_ms in StunningResult.c: zählt Zeit mit I ≥ nominal_mA (AREA OK + AREA TOLERATED). Zähler pausiert bei AREA INVALID, setzt aber nicht zurück."
@@ -46,12 +49,14 @@
     {
       "id":           "invalid_check",
       "op":           "invalid_timeout",
+      "type":         "completion",
       "max_invalid_s": 0.5,
       "_note": "Entspricht: INVALID_elapsed_ms > EQ_Properties.timeout_no_load_ms. Wert ist equipment-spezifisch (EQ_Properties), hier als typischer Default. In StunningResult.c setzt INVALID_elapsed_ms bei Rückkehr in VALID/TOLERATED zurück — im Batch-Modell wird kumuliert."
     },
     {
       "id":              "total_check",
       "op":              "total_timeout",
+      "type":            "completion",
       "duration_from":   "required_duration_s",
       "factor":          3.0,
       "_note": "Entspricht: total_elapsed_ms > Setpoints.timeout_ms * EQ_Properties.total_timeout_limit_factor. Faktor ist equipment-spezifisch, hier als typischer Default."

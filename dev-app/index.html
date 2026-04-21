@@ -165,6 +165,15 @@
       border-left-color: var(--fail);
       background: rgba(244,67,54,0.08);
     }
+    .violation-category {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 2px;
+    }
 
     /* ---- Chart area ---- */
     .chart-area {
@@ -195,7 +204,6 @@
 <body>
   <header>
     <h1>Stunning Algorithm Workbench</h1>
-    <span class="subtitle">Click chart to add samples · Drag to move · Right-click to delete</span>
   </header>
 
   <div class="workspace">
@@ -230,6 +238,7 @@
       <div class="panel">
         <div class="panel-title">Samples</div>
         <button class="btn" id="btn-reset">Reset to default</button>
+        <button class="btn" id="btn-copy">Copy samples</button>
         <button class="btn" id="btn-clear">Clear all</button>
       </div>
 

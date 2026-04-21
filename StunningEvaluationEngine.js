@@ -76,13 +76,14 @@ export function normalizeMeasurements(logEntry) {
 // ---------------------------------------------------------------------------
 
 /**
- * merge_below_ms — mark glitch gaps shorter than max_gap_ms as "ignored".
- * Returns a cleaned copy of the points array where short dips below `ref`
- * are interpolated away by holding the last good value.
+ * glitch_ignore — mark glitch gaps shorter than max_gap_ms as "ignored".
+ * Returns a copy of the points array where short dips below `ref` are held
+ * at the last good value so they do not trigger violation checks.
  *
- * The original points array is NOT mutated.
+ * The original points array is NOT mutated. Raw current values are preserved
+ * for steps that must see actual signal (charge_integral, min_duration_above).
  */
-function stepMergeBelowMs(points, step, A, B) {
+function stepGlitchIgnore(points, step, A, B) {
   const threshold = resolveThreshold(step.ref, A, B);
   const maxGapS = (step.max_gap_ms ?? 100) / 1000;
 
@@ -99,7 +100,7 @@ function stepMergeBelowMs(points, step, A, B) {
           const holdValue = dipStart > 0 ? result[dipStart - 1].I : threshold;
           for (let j = dipStart; j < i; j++) {
             result[j].I = holdValue;
-            result[j]._glitchMerged = true;
+            result[j]._glitchIgnored = true;
           }
         }
         dipStart = -1;
@@ -110,45 +111,42 @@ function stepMergeBelowMs(points, step, A, B) {
 }
 
 /**
- * When to start counting stunning duration / integral / sustain after `after_ramp`.
- * Set on `ramp_to_threshold` as `stunning_measure_from`:
- * - ramp_deadline (default): start at ramp start + within_s
- * - threshold_reached: start when the ramp effective threshold is first reached
- */
-/**
- * Returns when the ramp phase ends — used by sustain_thresholds as its start point.
+ * Returns when monitor violation counting may start (sustain_thresholds).
  *
- * Ramp ends at whichever comes first:
- *   - rampReachedAt_s : threshold reached → ramp succeeded, sustain starts immediately
- *   - rampDeadline_s  : within_s elapsed without threshold → ramp failed, sustain starts anyway
+ * Always waits for the full ramp deadline — the entire timeout_ms window is
+ * protected regardless of whether the setpoint was reached early. This prevents
+ * false warnings during normal current rise.
  */
-function getRampCompleteTime(runtimeCtx, step) {
-  return runtimeCtx?.rampReachedAt_s ?? runtimeCtx?.rampDeadline_s ?? (step.ramp_window_s ?? 1);
+function getMonitorStart(runtimeCtx) {
+  return runtimeCtx?.rampDeadline_s ?? 0;
 }
 
 /**
- * Returns when duration/integral accumulation starts.
- * Respects count_during_ramp: if true, counting begins from rampStart (I > ramp_start_mA).
+ * Returns when duration/integral accumulation starts (completion steps).
+ *
+ * If count_during_ramp is true, counting begins when the ramp timer starts.
+ * Otherwise it begins when the setpoint is first reached (rampReachedAt_s),
+ * or at the ramp deadline if the setpoint was never reached.
  */
-function getStunningAccumulateStart(runtimeCtx, step) {
+function getStunningAccumulateStart(runtimeCtx) {
   if (runtimeCtx?.count_during_ramp === true) {
     return runtimeCtx?.rampStart_s ?? 0;
   }
-  return getRampCompleteTime(runtimeCtx, step);
+  return runtimeCtx?.rampReachedAt_s ?? runtimeCtx?.rampDeadline_s ?? 0;
 }
 
 /**
- * ramp_to_threshold — check that current reaches threshold within window_s.
+ * ramp_to_threshold — check that current reaches threshold within timeout_ms.
  *
  * The ramp window starts when current first exceeds ramp_start_mA (default 10 mA),
- * not at t=0. The deadline is rampStart + within_s.
- * If within_s is null, the ramp check is disabled.
+ * not at t=0. The deadline is rampStart + timeout_ms/1000.
+ * If timeout_ms is null, the ramp check is disabled.
  *
  * Returns { violations, rampMeta } where rampMeta contains timing info
  * for the overlay (rampStart_s, rampDeadline_s, rampReachedAt_s).
  */
 function stepRampToThreshold(points, step, A, B) {
-  const windowS = step.within_s;
+  const windowS = step.timeout_ms != null ? step.timeout_ms / 1000 : null;
   const rampMeta = {};
 
   if (windowS == null) return { violations: [], rampMeta };
@@ -186,7 +184,7 @@ function stepRampToThreshold(points, step, A, B) {
       details: {
         required_mA: Math.round(threshold * 10) / 10,
         reached_mA: Math.round(maxInWindow * 10) / 10,
-        window_s: windowS
+        timeout_ms: step.timeout_ms
       }
     });
   }
@@ -197,7 +195,11 @@ function stepRampToThreshold(points, step, A, B) {
 /**
  * sustain_thresholds — state-based threshold monitoring.
  *
- * Evaluation only starts AFTER the ramp window (default 1s). After that:
+ * Violation counting starts when the ramp phase ends — whichever comes first:
+ *   - rampReachedAt_s : setpoint reached early → monitoring starts immediately
+ *   - rampDeadline_s  : timeout_ms elapsed without reaching setpoint → monitoring starts anyway
+ *
+ * Zones (after monitor start):
  *   - >= warnBelow (B) * warn_below_threshold_percent → OK (green)
  *   - >= failBelow (A) * fail_below_threshold_percent → warning (yellow)
  *   - below that → error (red)
@@ -224,8 +226,8 @@ function stepSustainThresholds(points, step, A, B, runtimeCtx) {
     return { violations, meta: { ok_s, warn_s, invalid_s } };
   }
 
-  // After ramp: start monitoring at ramp complete time
-  const monitorStart = getRampCompleteTime(runtimeCtx, step);
+  // Violations only start after the full ramp deadline — the entire timeout_ms window is protected.
+  const monitorStart = getMonitorStart(runtimeCtx);
   const completedAt = runtimeCtx?.completedAt_s ?? null;
 
   let refIdx = 0;
@@ -404,10 +406,10 @@ function stepMinDurationAbove(points, step, A, B, bindings, logEntry, runtimeCtx
   const threshold = resolveThreshold(step.threshold, A, B);
   const requiredField = step.duration_from;
   const requiredS = logEntry[bindings[requiredField]] ?? logEntry.time_s ?? 0;
-  const accumulateStart = getStunningAccumulateStart(runtimeCtx, step);
+  const accumulateStart = getStunningAccumulateStart(runtimeCtx);
   // Violations (gap warnings) are only opened after the ramp phase ends.
   // When count_during_ramp=false both values are equal; when true, accumulateStart is earlier.
-  const violationGuardStart = getRampCompleteTime(runtimeCtx, step);
+  const violationGuardStart = getMonitorStart(runtimeCtx);
   const violations = [];
 
   let totalAbove = 0;
@@ -442,7 +444,7 @@ function stepMinDurationAbove(points, step, A, B, bindings, logEntry, runtimeCtx
       }
     } else if (points[i].I < threshold && completedAt_s === null) {
       if (gapStart === null && points[i].t > violationGuardStart) {
-        gapStart = Math.max(points[i - 1].t, violationGuardStart);
+        gapStart = Math.max(points[i].t, violationGuardStart);
       }
     }
   }
@@ -496,10 +498,10 @@ function stepChargeIntegral(points, step, A, B, bindings, logEntry, runtimeCtx) 
   const limitValue = resolveThreshold(step.limit_to ?? 'setpoint_mA', A, B);
   const cutoffPercent = step.current_threshold_percent ?? 70;
   const cutoff = (cutoffPercent / 100) * limitValue;
-  const accumulateStart = getStunningAccumulateStart(runtimeCtx, step);
+  const accumulateStart = getStunningAccumulateStart(runtimeCtx);
   // Violations (cutoff warnings) are only opened after the ramp phase ends.
   // When count_during_ramp=false both values are equal; when true, accumulateStart is earlier.
-  const violationGuardStart = getRampCompleteTime(runtimeCtx, step);
+  const violationGuardStart = getMonitorStart(runtimeCtx);
 
   const target = step.target || {};
   const requiredS = logEntry[bindings[target.duration_from]] ?? logEntry.time_s ?? 0;
@@ -508,6 +510,7 @@ function stepChargeIntegral(points, step, A, B, bindings, logEntry, runtimeCtx) 
 
   let integral = 0;
   const violations = [];
+  const integralSeries = [];
   let deadStart = null;
   let completedAt_s = null;
 
@@ -524,6 +527,11 @@ function stepChargeIntegral(points, step, A, B, bindings, logEntry, runtimeCtx) 
 
     integral += ((eff0 + eff1) / 2) * dt;
 
+    integralSeries.push({
+      t: points[i].t,
+      pct: targetIntegral > 0 ? Math.min(integral / targetIntegral, 1) * 100 : 0
+    });
+
     if (completedAt_s === null && integral >= targetIntegral) {
       completedAt_s = points[i].t;
     }
@@ -531,7 +539,7 @@ function stepChargeIntegral(points, step, A, B, bindings, logEntry, runtimeCtx) 
     const isBelowCutoff = I1 < cutoff;
     if (isBelowCutoff && completedAt_s === null) {
       if (deadStart === null && points[i].t > violationGuardStart) {
-        deadStart = Math.max(points[i - 1].t, violationGuardStart);
+        deadStart = Math.max(points[i].t, violationGuardStart);
       }
     } else if (deadStart !== null) {
       if (completedAt_s === null) {
@@ -581,6 +589,7 @@ function stepChargeIntegral(points, step, A, B, bindings, logEntry, runtimeCtx) 
     meta: {
       integral_mAs: integral,
       target_mAs: targetIntegral,
+      integralSeries,
       completedAt_s,
       stunning_accumulate_start_s: accumulateStart
     }
@@ -592,13 +601,13 @@ function stepChargeIntegral(points, step, A, B, bindings, logEntry, runtimeCtx) 
 // ---------------------------------------------------------------------------
 
 const OP_MAP = {
-  merge_below_ms:    'merge',
-  ramp_to_threshold: 'ramp',
+  glitch_ignore:      'glitch_ignore',
+  ramp_to_threshold:  'ramp',
   sustain_thresholds: 'sustain',
   min_duration_above: 'duration',
-  charge_integral:   'integral',
-  invalid_timeout:   'invalid_timeout',
-  total_timeout:     'total_timeout'
+  charge_integral:    'integral',
+  invalid_timeout:    'invalid_timeout',
+  total_timeout:      'total_timeout'
 };
 
 // ---------------------------------------------------------------------------
@@ -638,12 +647,14 @@ export function evaluate(logEntry, spec) {
       continue;
     }
 
+    const violationsBefore = allViolations.length;
+
     switch (opKey) {
-      case 'merge':
-        // Glitch-merged values are only used by sustain_thresholds (violation detection).
+      case 'glitch_ignore':
+        // Glitch-ignored values are only used by sustain_thresholds (violation detection).
         // charge_integral and min_duration_above must see actual current so that
         // real dips below nominal correctly reduce the integral / extend stunning time.
-        runtimeCtx.mergedPoints = stepMergeBelowMs(points, step, A, B);
+        runtimeCtx.mergedPoints = stepGlitchIgnore(points, step, A, B);
         break;
 
       case 'ramp': {
@@ -705,6 +716,12 @@ export function evaluate(logEntry, spec) {
       default:
         break;
     }
+
+    if (step.type) {
+      for (let i = violationsBefore; i < allViolations.length; i++) {
+        allViolations[i] = { ...allViolations[i], stepType: step.type };
+      }
+    }
   }
 
   // State-based post-processing: once stunning is "complete" (required
@@ -721,6 +738,16 @@ export function evaluate(logEntry, spec) {
         v.tEnd_s = completedAt;
       }
     }
+  }
+
+  // Suppress warn violations whose interval is fully covered by an error violation.
+  // When an error already flags the same period, the warning is redundant.
+  const errorViolations = allViolations.filter(v => !v.isSummary && v.severity === 'error');
+  for (let i = allViolations.length - 1; i >= 0; i--) {
+    const v = allViolations[i];
+    if (v.isSummary || v.severity !== 'warn') continue;
+    const covered = errorViolations.some(e => e.tStart_s <= v.tStart_s && e.tEnd_s >= v.tEnd_s);
+    if (covered) allViolations.splice(i, 1);
   }
 
   // Compute overlay hints from the spec + computed ramp meta
@@ -753,6 +780,7 @@ export function evaluate(logEntry, spec) {
       const limitVal = resolveThreshold(step.limit_to ?? 'setpoint_mA', A, B);
       const cutPct = step.current_threshold_percent ?? 70;
       overlayHints.integralCutoff_mA = (cutPct / 100) * limitVal;
+      overlayHints.integralSeries = allMeta.integralSeries ?? null;
     }
   }
 

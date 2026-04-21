@@ -12,23 +12,26 @@
   "timebase": "relative_s_from_Time_ms",
   "steps": [
     {
-      "id": "glitch_merge",
-      "op": "merge_below_ms",
+      "id": "glitch_ignore",
+      "op": "glitch_ignore",
+      "type": "filter",
       "ref": "nominal_mA",
       "max_gap_ms": 100
     },
     {
       "id": "ramp",
       "op": "ramp_to_threshold",
+      "type": "startup",
       "threshold": "setpoint_mA",
       "current_threshold_percent": 100,
-      "within_s": 1,
+      "timeout_ms": 1000,
       "ramp_start_mA": 10,
       "count_during_ramp": false
     },
     {
       "id": "sustain",
       "op": "sustain_thresholds",
+      "type": "monitor",
       "after": "after_ramp",
       "warn_below": "setpoint_mA",
       "warn_below_threshold_percent": 100,
@@ -38,17 +41,20 @@
     {
       "id": "duration",
       "op": "min_duration_above",
+      "type": "completion",
       "threshold": "nominal_mA",
       "duration_from": "required_duration_s"
     },
     {
       "id": "invalid_check",
       "op": "invalid_timeout",
+      "type": "completion",
       "max_invalid_s": 0.5
     },
     {
       "id": "total_check",
       "op": "total_timeout",
+      "type": "completion",
       "duration_from": "required_duration_s",
       "factor": 3.0
     }

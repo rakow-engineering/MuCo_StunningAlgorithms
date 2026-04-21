@@ -101,7 +101,7 @@ def generate_config_c(spec):
         if op not in ops:
             ops[op] = s
 
-    merge    = ops.get('merge_below_ms',    {})
+    merge    = ops.get('glitch_ignore',      {})
     ramp     = ops.get('ramp_to_threshold', {})
     sustain  = ops.get('sustain_thresholds',{})
     duration = ops.get('min_duration_above',{})
@@ -126,7 +126,7 @@ def generate_config_c(spec):
 
     L.append(u'    .ramp = {')
     L.append(u'        .enabled           = {0},'.format(_bool(bool(ramp))))
-    L.append(u'        .within_ms         = {0},'.format(int(round(ramp.get('within_s', 1.0) * 1000)) if ramp else 1000))
+    L.append(u'        .within_ms         = {0},'.format(int(ramp.get('timeout_ms', 1000)) if ramp else 1000))
     L.append(u'        .start_mA          = {0}f,'.format(float(ramp.get('ramp_start_mA', 10.0))))
     L.append(u'        .threshold_percent = {0}u,'.format(int(ramp.get('current_threshold_percent', 100))))
     L.append(u'        .count_during      = {0},'.format(_bool(ramp.get('count_during_ramp', False))))
