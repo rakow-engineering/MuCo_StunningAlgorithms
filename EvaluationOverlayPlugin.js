@@ -196,6 +196,19 @@ function formatViolation(v) {
 }
 
 // ---------------------------------------------------------------------------
+// Threshold label helpers
+// ---------------------------------------------------------------------------
+
+function friendlyThresholdName(bindingName) {
+  switch (bindingName) {
+    case 'nominal_mA':           return 'Nominal';
+    case 'setpoint_mA':          return 'Setpoint';
+    case 'min_nominal_setpoint': return 'Min(N,S)';
+    default: return bindingName ?? '';
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Integral progress line + right-side % axis
 // ---------------------------------------------------------------------------
 
@@ -413,13 +426,18 @@ const evaluationOverlayPlugin = {
       const failDiffers = effFail != null && Math.abs(effFail - A) > 0.5;
       const warnDiffers = effWarn != null && Math.abs(effWarn - B) > 0.5;
 
+      const aName = friendlyThresholdName(hints.failBelowName) || 'A';
+      const bName = friendlyThresholdName(hints.warnBelowName) || 'B';
+      const aPct  = hints.failBelowPercent;
+      const bPct  = hints.warnBelowPercent;
+
       // Raw A — always draw as reference (lighter if effective differs)
       if (A > 0) {
         const yA = yScale.getPixelForValue(A);
         if (yA >= chartArea.top && yA <= chartArea.bottom) {
           const color = failDiffers ? COLORS.lineARef : COLORS.lineA;
           drawDashedLine(ctx, yA, chartArea.left, chartArea.right, color);
-          drawLabel(ctx, `A = ${A} mA`, chartArea.left, yA, color);
+          drawLabel(ctx, `${aName} = ${A} mA`, chartArea.left, yA, color);
         }
       }
 
@@ -429,25 +447,25 @@ const evaluationOverlayPlugin = {
         if (yB >= chartArea.top && yB <= chartArea.bottom) {
           const color = warnDiffers ? COLORS.lineBRef : COLORS.lineB;
           drawDashedLine(ctx, yB, chartArea.left, chartArea.right, color);
-          drawLabel(ctx, `B = ${B} mA`, chartArea.left, yB, color);
+          drawLabel(ctx, `${bName} = ${B} mA`, chartArea.left, yB, color);
         }
       }
 
-      // Effective fail threshold (if differs from raw A)
-      if (effFail != null && failDiffers) {
+      // Effective fail threshold — shown when percent is set and not 100
+      if (effFail != null && aPct != null && aPct !== 100) {
         const yEF = yScale.getPixelForValue(effFail);
         if (yEF >= chartArea.top && yEF <= chartArea.bottom) {
           drawDashedLine(ctx, yEF, chartArea.left, chartArea.right, COLORS.lineA);
-          drawLabel(ctx, `Fail = ${Math.round(effFail)} mA`, chartArea.left, yEF, COLORS.lineA);
+          drawLabel(ctx, `${aName} × ${aPct}% = ${Math.round(effFail)} mA`, chartArea.left, yEF, COLORS.lineA);
         }
       }
 
-      // Effective warn threshold (if differs from raw B)
-      if (effWarn != null && warnDiffers) {
+      // Effective warn threshold — shown when percent is set and not 100
+      if (effWarn != null && bPct != null && bPct !== 100) {
         const yEW = yScale.getPixelForValue(effWarn);
         if (yEW >= chartArea.top && yEW <= chartArea.bottom) {
           drawDashedLine(ctx, yEW, chartArea.left, chartArea.right, COLORS.lineB);
-          drawLabel(ctx, `Warn = ${Math.round(effWarn)} mA`, chartArea.left, yEW, COLORS.lineB);
+          drawLabel(ctx, `${bName} × ${bPct}% = ${Math.round(effWarn)} mA`, chartArea.left, yEW, COLORS.lineB);
         }
       }
 

@@ -1,3 +1,5 @@
+import './workbench.css';
+
 /**
  * Stunning Algorithm Workbench — main entry point.
  *

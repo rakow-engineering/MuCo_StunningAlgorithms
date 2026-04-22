@@ -794,6 +794,10 @@ export function evaluate(logEntry, spec) {
         ? resolveThreshold(step.warn_below, A, B) * warnPct / 100 : null;
       overlayHints.effectiveFailBelow_mA = failPct != null
         ? resolveThreshold(step.fail_below, A, B) * failPct / 100 : null;
+      overlayHints.failBelowName    = step.fail_below;
+      overlayHints.warnBelowName    = step.warn_below;
+      overlayHints.failBelowPercent = failPct;
+      overlayHints.warnBelowPercent = warnPct;
     }
     if (step.op === 'min_duration_above') {
       overlayHints.durationSeries = allMeta.durationSeries ?? null;

@@ -6,32 +6,7 @@ rampup:
 
 Steps: 
 
-/* Initialer Aufstart-Vorgang */ 
-1. ramp
-	The rampup stemp is a first initial state, that supresses all other state-evaluations
 
-
-/* Filterung */
-2. glitch_merge  --> rename to glitch_ignore 
-	The data must not be altered, we only want to ignore some short glitches, without throwing an error or warning state 
-
-/* Überwachung */
-3. sustain  
-	Here there are limits, that lead to downgrade the state to error or warnig, when value goes below. 
-	Limits are not hardly fixed the the profile settings, the thresholds can be set relativ to the setpoints
-
-/* Das sind alles überwachungen die zum Fertigstellen des Vorgangs führen */ 
-4. charge_ok --> Bedeutet so viel wie ladung ok. 
-    Was macht das? Hat das was mit dem Integral zu tun? 
-	scheint als required_duration_s * setpoint_mA zu haben  
-5. invalid_check
-	das scheint eine Art Timeout zu sein. 
-6. total_check: 
-    gesamt-timeout (im integral-fall) 
-7. duration 
-	Betäubungszeit-Ziel (bei nicht ingeral-wert) 
-	
-	
 
 
 Handler: 
@@ -41,7 +16,6 @@ Handler:
 
 
 Overlay: 
-* im Integral-modus, bitte eine zweite Linie anzeigenm die den Integral-Zielwert als linie anzeigt und den wert des Integrals zeitlich darstellt: 
 
 * Horizontale Marker: 
 - A und B bitte mit Nominal und Setpoint konsistent beschriften
