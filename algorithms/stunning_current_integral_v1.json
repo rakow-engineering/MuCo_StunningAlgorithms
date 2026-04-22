@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "algorithm_id": 3,
-  "display_name": "Integral: Rampe, Schwellen nominal/setpoint, Strom-Zeit-Integral",
+  "display_name": "Strom-Zeit-Integral",
   "description": "Wie Standard, aber statt reiner Mindestdauer wird das Strom-Zeit-Integral (mA·s) bewertet. Strom wird auf setpoint_mA begrenzt; unterhalb 70 % dieser Grenze wird nicht integriert. Ziel: Integral >= required_duration_s × setpoint_mA.",
   "bindings": {
     "series": "current_mA",

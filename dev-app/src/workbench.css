@@ -192,3 +192,241 @@ select option { background: var(--surface); }
 }
 
 canvas { display: block; }
+
+/* =========================================================================
+   Algorithm Editor Modal
+   ========================================================================= */
+
+.ae-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 200;
+  display: none;
+}
+.ae-overlay.ae-visible { display: block; }
+
+.ae-modal {
+  position: absolute;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 580px;
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+}
+
+/* Header */
+.ae-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  cursor: move;
+  user-select: none;
+}
+.ae-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ae-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+.ae-close:hover { color: var(--text); }
+
+/* Tab bar */
+.ae-tabs {
+  display: flex;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  padding: 0 8px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.ae-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 7px 12px;
+  cursor: pointer;
+  margin-bottom: -1px;
+  transition: color 0.12s;
+}
+.ae-tab:hover { color: var(--text); }
+.ae-tab.ae-tab-active { color: var(--accent2); border-bottom-color: var(--accent2); }
+
+/* Scrollable content */
+.ae-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ae-empty {
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: center;
+  padding: 20px 0;
+}
+
+/* Step card */
+.ae-step {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.ae-step-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+}
+.ae-step-op {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent2);
+}
+.ae-step-id {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: monospace;
+}
+.ae-step-body {
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Field rows */
+.ae-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 26px;
+}
+.ae-field-bool {
+  padding-left: 2px;
+}
+.ae-field-label {
+  flex: 0 0 150px;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: right;
+}
+.ae-field-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+/* Editor inputs — scoped to .ae-modal to avoid affecting the sidebar */
+.ae-modal input[type="number"],
+.ae-modal input[type="number"]:focus {
+  width: 80px;
+  padding: 4px 7px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: var(--radius);
+  outline: none;
+}
+.ae-modal input[type="number"]:focus { border-color: var(--accent2); }
+.ae-modal input[type="number"].ae-disabled { opacity: 0.35; }
+
+.ae-input { /* alias class applied by JS */ }
+
+.ae-select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 7px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  flex: 1;
+  outline: none;
+  min-width: 0;
+}
+.ae-select:focus { border-color: var(--accent2); }
+.ae-select option { background: var(--surface); }
+
+.ae-checkbox {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent2);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ae-bool-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  padding-left: 162px; /* align with field controls */
+}
+
+.ae-unit {
+  font-size: 10px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+/* Footer */
+.ae-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface2);
+  flex-shrink: 0;
+}
+.ae-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: var(--radius);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.ae-btn:hover { background: var(--surface2); }
+.ae-btn-primary {
+  background: var(--accent2);
+  border-color: var(--accent2);
+  color: #fff;
+}
+.ae-btn-primary:hover { filter: brightness(1.15); }

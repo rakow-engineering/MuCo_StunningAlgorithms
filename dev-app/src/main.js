@@ -15,6 +15,7 @@ import Chart from 'chart.js/auto';
 import { evaluate }               from '@algo/StunningEvaluationEngine.js';
 import evaluationOverlayPlugin    from '@algo/EvaluationOverlayPlugin.js';
 import { createSampleEditorPlugin } from './sampleEditorPlugin.js';
+import { createAlgoEditor }         from './algoEditor.js';
 
 import spec1 from '@algo/algorithms/stunning_embedded_v10.json';
 import spec2 from '@algo/algorithms/stunning_current_v1.json';
@@ -73,10 +74,11 @@ const elBadge      = document.getElementById('result-badge');
 const elZoneTimes  = document.getElementById('zone-times');
 const elViolations = document.getElementById('violations');
 const elShowProgress = document.getElementById('show-progress');
-const elBtnReset   = document.getElementById('btn-reset');
-const elBtnCopy    = document.getElementById('btn-copy');
-const elBtnClear   = document.getElementById('btn-clear');
-const canvas       = document.getElementById('dev-chart');
+const elBtnReset     = document.getElementById('btn-reset');
+const elBtnCopy      = document.getElementById('btn-copy');
+const elBtnClear     = document.getElementById('btn-clear');
+const elBtnEditAlgo  = document.getElementById('btn-edit-algo');
+const canvas         = document.getElementById('dev-chart');
 
 // ---- Header logos -------------------------------------------------------
 
@@ -130,7 +132,7 @@ function updateAxisBounds() {
 // ---- Re-evaluate and update UI -----------------------------------------
 
 function reEvaluate() {
-  const spec    = SPECS[state.algoId];
+  const spec    = getCurrentSpec();
   const samples = chart.data.datasets[0].data;
 
   updateAxisBounds();
@@ -256,6 +258,23 @@ const chart = new Chart(canvas, {
 // Chart.js handles canvas sizing via responsive:true / maintainAspectRatio:false.
 // The chart-wrap container drives the size through CSS flex layout.
 window.addEventListener('resize', () => chart.resize());
+
+// ---- Algorithm editor --------------------------------------------------
+// specOverrides holds user-edited copies of algorithm specs, keyed by algoId.
+// reEvaluate() prefers the override when present.
+
+const specOverrides = {};
+
+function getCurrentSpec() {
+  return specOverrides[state.algoId] ?? SPECS[state.algoId];
+}
+
+const algoEditor = createAlgoEditor((updatedSpec) => {
+  specOverrides[state.algoId] = updatedSpec;
+  reEvaluate();
+});
+
+elBtnEditAlgo.addEventListener('click', () => algoEditor.open(getCurrentSpec()));
 
 // ---- Profile input handlers --------------------------------------------
 

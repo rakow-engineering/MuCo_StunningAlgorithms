@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "algorithm_id": 1,
-  "display_name": "Embedded V10: Rampe 1s, Mindestdauer >= nominal",
+  "display_name": "Embedded V10",
   "description": "Beschreibt die aktuelle StunningResult.c V10.x Implementierung. Kein Glitch-Filter. Betäubungszeit zählt solange der Strom ≥ nominal_mA (AREA OK + AREA TOLERATED zählen beide). Ergebnis OK wenn durchgehend ≥ setpoint, UNSHURE wenn zeitweise in TOLERATED oder INVALID. FAIL bei INVALID-Timeout oder Gesamt-Timeout.",
 
   "bindings": {

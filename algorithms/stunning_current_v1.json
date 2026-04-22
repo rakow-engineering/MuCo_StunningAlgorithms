@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "algorithm_id": 2,
-  "display_name": "Standard: Rampe, Schwellen nominal/setpoint, Mindestdauer",
+  "display_name": "Standard",
   "description": "Klassische Auswertung: Anstieg auf setpoint_mA in 1s, dann dauerhaft >= nominal_mA (rot) / >= setpoint_mA (gelb), Mindest-Betäubungszeit über nominal_mA.",
   "bindings": {
     "series": "current_mA",
