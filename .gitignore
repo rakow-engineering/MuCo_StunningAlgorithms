@@ -2,5 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 /dev-app/node_modules
-/test/node_modules
 /dev-app/dist-file
+/dev-app/dist
+/test/node_modules
+/dev-app/dist-file/index.html
