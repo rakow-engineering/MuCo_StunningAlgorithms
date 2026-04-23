@@ -1,0 +1,92 @@
+{
+  "suite": "pipeline_standard",
+  "description": "Full pipeline: Standard algorithm (algo 2) — glitch filter + ramp + sustain + duration",
+  "algorithm": "../../algorithms/stunning_current_v1.json",
+  "runtime": { "nominal_mA": 300, "setpoint_mA": 350, "required_duration_s": 3.0 },
+  "cases": [
+    {
+      "id": "pass_clean",
+      "description": "Ramp reaches setpoint in 500 ms, then stays above nominal for 3+ s → OK",
+      "samples": [
+        { "t_ms": 0,    "I_mA": 0   },
+        { "t_ms": 100,  "I_mA": 50  },
+        { "t_ms": 500,  "I_mA": 360 },
+        { "t_ms": 1000, "I_mA": 360 },
+        { "t_ms": 2000, "I_mA": 360 },
+        { "t_ms": 3000, "I_mA": 360 },
+        { "t_ms": 4100, "I_mA": 360 }
+      ],
+      "expect": {
+        "ok": true,
+        "violations": []
+      }
+    },
+    {
+      "id": "fail_ramp_timeout",
+      "description": "Current never reaches setpoint in 1 s window → ramp_not_reached + duration_not_reached",
+      "samples": [
+        { "t_ms": 0,    "I_mA": 0   },
+        { "t_ms": 100,  "I_mA": 50  },
+        { "t_ms": 1200, "I_mA": 200 },
+        { "t_ms": 5000, "I_mA": 200 }
+      ],
+      "expect": {
+        "ok": false,
+        "violation_message_keys": ["ramp_not_reached", "duration_not_reached"]
+      }
+    },
+    {
+      "id": "pass_with_short_glitch",
+      "description": "A 60 ms dip below nominal is forgiven by the glitch filter → no INVALID time",
+      "samples": [
+        { "t_ms": 0,    "I_mA": 0   },
+        { "t_ms": 100,  "I_mA": 50  },
+        { "t_ms": 500,  "I_mA": 360 },
+        { "t_ms": 1000, "I_mA": 360 },
+        { "t_ms": 1500, "I_mA": 100 },
+        { "t_ms": 1560, "I_mA": 360 },
+        { "t_ms": 4200, "I_mA": 360 }
+      ],
+      "expect": {
+        "ok": true,
+        "violations": []
+      }
+    },
+    {
+      "id": "fail_invalid_timeout",
+      "description": "Dip starts at t=1110ms (after ramp deadline 1100ms); 690ms INVALID time > 500ms limit → invalid_timeout violation",
+      "samples": [
+        { "t_ms": 0,    "I_mA": 0   },
+        { "t_ms": 100,  "I_mA": 50  },
+        { "t_ms": 500,  "I_mA": 360 },
+        { "t_ms": 1000, "I_mA": 360 },
+        { "t_ms": 1100, "I_mA": 360 },
+        { "t_ms": 1110, "I_mA": 50  },
+        { "t_ms": 1800, "I_mA": 50  },
+        { "t_ms": 1810, "I_mA": 360 },
+        { "t_ms": 5000, "I_mA": 360 }
+      ],
+      "expect": {
+        "ok": false,
+        "violation_message_keys": ["invalid_timeout"]
+      }
+    },
+    {
+      "id": "sustain_no_monitoring_before_deadline",
+      "description": "Even though threshold is reached at 300 ms, sustain monitoring only starts at the full 1100 ms deadline (ramp_start=100ms + 1000ms window). Dip at 600 ms must not produce a violation.",
+      "samples": [
+        { "t_ms": 0,    "I_mA": 0   },
+        { "t_ms": 100,  "I_mA": 50  },
+        { "t_ms": 300,  "I_mA": 360 },
+        { "t_ms": 600,  "I_mA": 50  },
+        { "t_ms": 900,  "I_mA": 50  },
+        { "t_ms": 1100, "I_mA": 360 },
+        { "t_ms": 4200, "I_mA": 360 }
+      ],
+      "expect": {
+        "ok": true,
+        "violations": []
+      }
+    }
+  ]
+}

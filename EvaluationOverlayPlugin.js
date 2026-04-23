@@ -362,7 +362,10 @@ const evaluationOverlayPlugin = {
   afterDatasetsDraw(chart) {
     const chartId = chart.canvas?.id;
     const evalData = evaluationDataByChartId[chartId];
-    if (!evalData) return;
+    if (!evalData) {
+      delete badgeHitBoxByChartId[chartId];
+      return;
+    }
 
     const { thresholds, violations, ok, hasWarn, meta, overlayHints } = evalData;
     const ctx = chart.ctx;
@@ -557,7 +560,13 @@ const evaluationOverlayPlugin = {
       evaluationDataByChartId[chartId] = data;
     } else {
       delete evaluationDataByChartId[chartId];
+      delete badgeHitBoxByChartId[chartId];
     }
+  },
+
+  /** Last drawn OK/WARN/FAIL badge rect in canvas/CSS pixel space (chart top-left origin), or null. */
+  getBadgeHitBox(chartId) {
+    return badgeHitBoxByChartId[chartId] ?? null;
   },
 
   onBadgeClick(chartId, callback) {

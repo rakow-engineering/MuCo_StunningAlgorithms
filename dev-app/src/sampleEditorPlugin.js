@@ -1,30 +1,64 @@
 /**
  * sampleEditorPlugin — Chart.js plugin for interactive sample editing.
  *
- * Interactions:
- *   Left-click on empty area  →  add a new sample point
- *   Left-drag on existing pt  →  move the point (x = time, y = current)
- *   Right-click on point      →  delete the point
+ * Uses Pointer Events + setPointerCapture so drag works on touch and pen.
  *
- * The plugin calls onChanged(samples) after every edit where
- * samples = [{x, y}, ...] sorted by x (time).
+ * Interactions:
+ *   Primary tap/click on empty chart  →  add sample
+ *   Primary drag on point              →  move (x = time, y = current)
+ *   Primary tap on point               →  select (toggle)
+ *   Tap red × circle (NW of selected point) →  delete that sample
+ *   Right-click on point               →  delete (desktop)
+ *
+ * onChanged(samples) after every edit; samples sorted by x.
+ * options.onSelectionChange(index | null) when the selected point changes.
  */
 
-const SNAP_RADIUS    = 14;   // px — how close the cursor must be to "hit" a point
-const DRAG_THRESHOLD =  4;   // px — movement before a click becomes a drag
+const SNAP_RADIUS_FINE    = 14;
+const SNAP_RADIUS_COARSE  = 26;
+const DRAG_THRESHOLD_FINE   = 4;
+const DRAG_THRESHOLD_COARSE = 10;
 
-export function createSampleEditorPlugin(onChanged) {
-  let dragIdx      = null;   // dataset index of the point being dragged
-  let hoverIdx     = -1;     // dataset index under the cursor
-  let mouseDownPos = null;   // {x, y} in canvas pixels at mousedown
-  let mouseDownIdx = null;   // hit-tested index at mousedown (-1 = miss)
-  let isDragging   = false;
+/** Delete handle: circle at top-left of selected point (canvas px). */
+const DELETE_HANDLE_R_FINE   = 11;
+const DELETE_HANDLE_R_COARSE = 15;
+const DELETE_HANDLE_EDGE_FINE   = 17;
+const DELETE_HANDLE_EDGE_COARSE = 24;
 
-  // ---- Coordinate helpers ------------------------------------------------
+function isCoarsePointer() {
+  return typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+}
+
+export function createSampleEditorPlugin(onChanged, options = {}) {
+  const { onSelectionChange } = options;
+
+  let chartRef         = null;
+  let activePointerId  = null;
+  let dragIdx          = null;
+  let hoverIdx         = -1;
+  let downPos          = null;
+  let downIdx          = null;
+  let downPointRef     = null;
+  let isDragging       = false;
+  /** @type {{ x: number, y: number } | null} */
+  let selectedRef      = null;
+
+  const listeners = [];
+
+  function addListener(target, type, fn, opts) {
+    target.addEventListener(type, fn, opts);
+    listeners.push([target, type, fn, opts]);
+  }
+
+  function snapRadius() {
+    return isCoarsePointer() ? SNAP_RADIUS_COARSE : SNAP_RADIUS_FINE;
+  }
+
+  function dragThreshold() {
+    return isCoarsePointer() ? DRAG_THRESHOLD_COARSE : DRAG_THRESHOLD_FINE;
+  }
 
   function canvasPos(canvas, event) {
-    // Chart.js scale methods (getValueForPixel / getPixelForValue) operate in
-    // CSS pixel space — do NOT multiply by devicePixelRatio here.
     const rect = canvas.getBoundingClientRect();
     return {
       x: event.clientX - rect.left,
@@ -41,8 +75,9 @@ export function createSampleEditorPlugin(onChanged) {
     const data   = chart.data.datasets[0].data;
     const xScale = chart.scales.x;
     const yScale = chart.scales.y;
+    const R      = snapRadius();
     let best = -1;
-    let best_d = SNAP_RADIUS;
+    let best_d = R;
     for (let i = 0; i < data.length; i++) {
       const px = xScale.getPixelForValue(data[i].x);
       const py = yScale.getPixelForValue(data[i].y);
@@ -63,31 +98,155 @@ export function createSampleEditorPlugin(onChanged) {
     return [...data].sort((a, b) => a.x - b.x);
   }
 
-  // ---- Plugin definition -------------------------------------------------
+  function selectedIndex() {
+    if (!chartRef || !selectedRef) return -1;
+    return chartRef.data.datasets[0].data.indexOf(selectedRef);
+  }
 
-  return {
+  function emitSelection() {
+    const i = selectedIndex();
+    onSelectionChange?.(i >= 0 ? i : null);
+  }
+
+  function applyPointRadii() {
+    if (!chartRef) return;
+    const coarse = isCoarsePointer();
+    const ds     = chartRef.data.datasets[0];
+    ds.pointRadius      = coarse ? 9 : 5;
+    ds.pointHoverRadius = coarse ? 13 : 7;
+  }
+
+  function activeDrawIdx(chart) {
+    const data = chart.data.datasets[0].data;
+    if (isDragging && dragIdx !== null && dragIdx >= 0 && dragIdx < data.length) return dragIdx;
+    if (hoverIdx >= 0) return hoverIdx;
+    const si = selectedIndex();
+    return si;
+  }
+
+  /** Geometry of the red × delete control for the current selection (or null). */
+  function deleteHandleGeom(chart) {
+    const si = selectedIndex();
+    if (si < 0 || !selectedRef) return null;
+    const data = chart.data.datasets[0].data;
+    if (si >= data.length) return null;
+    const xScale = chart.scales.x;
+    const yScale = chart.scales.y;
+    const px = xScale.getPixelForValue(data[si].x);
+    const py = yScale.getPixelForValue(data[si].y);
+    const coarse = isCoarsePointer();
+    const r    = coarse ? DELETE_HANDLE_R_COARSE : DELETE_HANDLE_R_FINE;
+    const edge = coarse ? DELETE_HANDLE_EDGE_COARSE : DELETE_HANDLE_EDGE_FINE;
+    const { left, right, top, bottom } = chart.chartArea;
+    let cx = px - edge;
+    let cy = py - edge;
+    cx = Math.max(left + r + 1, Math.min(right - r - 1, cx));
+    cy = Math.max(top + r + 1, Math.min(bottom - r - 1, cy));
+    const hitExtra = coarse ? 8 : 4;
+    return { cx, cy, r, hitExtra };
+  }
+
+  function hitDeleteHandle(chart, x, y) {
+    const g = deleteHandleGeom(chart);
+    if (!g) return false;
+    return Math.hypot(x - g.cx, y - g.cy) <= g.r + g.hitExtra;
+  }
+
+  function drawDeleteHandle(chart) {
+    const g = deleteHandleGeom(chart);
+    if (!g) return;
+    const ctx = chart.ctx;
+    const { cx, cy, r } = g;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle   = 'rgba(211, 47, 47, 0.96)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.lineWidth   = 1;
+    ctx.fill();
+    ctx.stroke();
+    const inset = r * 0.42;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth   = 2;
+    ctx.lineCap     = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx - inset, cy - inset);
+    ctx.lineTo(cx + inset, cy + inset);
+    ctx.moveTo(cx + inset, cy - inset);
+    ctx.lineTo(cx - inset, cy + inset);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function deleteSelectedSample() {
+    if (!chartRef) return;
+    const idx = selectedIndex();
+    if (idx < 0) return;
+    const data = chartRef.data.datasets[0].data;
+    data.splice(idx, 1);
+    selectedRef = null;
+    hoverIdx = -1;
+    chartRef.update('none');
+    onChanged([...data]);
+    emitSelection();
+  }
+
+  function clearSelection() {
+    if (selectedRef === null) return;
+    selectedRef = null;
+    emitSelection();
+    chartRef?.update('none');
+  }
+
+  const plugin = {
     id: 'sampleEditor',
 
     afterInit(chart) {
+      chartRef = chart;
       const canvas = chart.canvas;
+      canvas.classList.add('chart-sample-editor');
 
-      // ---- mousedown: hit-test, prepare drag or click ----
-      canvas.addEventListener('mousedown', (e) => {
+      applyPointRadii();
+      const mq = window.matchMedia('(pointer: coarse)');
+      const onMq = () => {
+        applyPointRadii();
+        chart.update('none');
+      };
+      addListener(mq, 'change', onMq);
+
+      addListener(canvas, 'pointerdown', (e) => {
         if (e.button !== 0) return;
+        if (activePointerId !== null) return;
+
         const pos = canvasPos(canvas, e);
+        if (hitDeleteHandle(chart, pos.x, pos.y)) {
+          deleteSelectedSample();
+          e.preventDefault();
+          return;
+        }
+
         if (!inChartArea(chart, pos.x, pos.y)) return;
-        mouseDownPos = pos;
-        mouseDownIdx = nearestIdx(chart, pos.x, pos.y);
-        dragIdx      = mouseDownIdx;
+
+        activePointerId = e.pointerId;
+        try {
+          canvas.setPointerCapture(e.pointerId);
+        } catch (_) { /* already captured or unsupported */ }
+
+        downPos      = pos;
+        downIdx      = nearestIdx(chart, pos.x, pos.y);
+        const data   = chart.data.datasets[0].data;
+        downPointRef = downIdx >= 0 ? data[downIdx] : null;
+        dragIdx      = downIdx;
         isDragging   = false;
       });
 
-      // ---- mousemove: drag existing point or just update hover ----
-      canvas.addEventListener('mousemove', (e) => {
+      addListener(canvas, 'pointermove', (e) => {
         const pos  = canvasPos(canvas, e);
         const data = chart.data.datasets[0].data;
+        const th   = dragThreshold();
 
-        // Update hover index (for visual feedback)
+        if (activePointerId !== null && e.pointerId !== activePointerId) return;
+
         const newHover = inChartArea(chart, pos.x, pos.y)
           ? nearestIdx(chart, pos.x, pos.y)
           : -1;
@@ -96,8 +255,9 @@ export function createSampleEditorPlugin(onChanged) {
           chart.update('none');
         }
 
-        // Cursor shape
-        if (inChartArea(chart, pos.x, pos.y)) {
+        if (hitDeleteHandle(chart, pos.x, pos.y)) {
+          canvas.style.cursor = 'pointer';
+        } else if (inChartArea(chart, pos.x, pos.y)) {
           canvas.style.cursor = (hoverIdx >= 0)
             ? (isDragging ? 'grabbing' : 'grab')
             : 'crosshair';
@@ -105,111 +265,161 @@ export function createSampleEditorPlugin(onChanged) {
           canvas.style.cursor = '';
         }
 
-        // Active drag
-        if (dragIdx !== null && dragIdx >= 0 && mouseDownPos) {
-          const dx = Math.abs(pos.x - mouseDownPos.x);
-          const dy = Math.abs(pos.y - mouseDownPos.y);
-          if (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD) {
-            isDragging = true;
-          }
+        if (activePointerId === null) return;
+
+        if (dragIdx !== null && dragIdx >= 0 && downPos) {
+          const dx = Math.abs(pos.x - downPos.x);
+          const dy = Math.abs(pos.y - downPos.y);
+          if (dx > th || dy > th) isDragging = true;
           if (isDragging) {
             canvas.style.cursor = 'grabbing';
             const pt = dataFromPixel(chart, pos.x, pos.y);
             data[dragIdx].x = pt.x;
             data[dragIdx].y = pt.y;
-            // Redraw without sorting so dragIdx stays valid during motion.
-            // Pass sorted copy to evaluator so results are always correct.
             chart.update('none');
             onChanged(sortedCopy(data));
           }
         }
       });
 
-      // ---- mouseup: finalise drag or add point on clean click ----
-      canvas.addEventListener('mouseup', (e) => {
-        if (!mouseDownPos) return;
+      const endPointer = (e) => {
+        if (e.pointerId !== activePointerId) return;
 
-        const pos  = canvasPos(canvas, e);
-        const data = chart.data.datasets[0].data;
+        const hadDown = !!downPos;
+        const pos     = canvasPos(canvas, e);
+        const data    = chart.data.datasets[0].data;
+        const th      = dragThreshold();
+        const pid     = e.pointerId;
 
-        if (isDragging && dragIdx >= 0) {
-          // Sort dataset in-place after drag so line renders correctly
-          data.sort((a, b) => a.x - b.x);
-          chart.update('none');
-          onChanged([...data]);
-        } else {
-          // Clean click (no significant movement)
-          const dx = Math.abs(pos.x - mouseDownPos.x);
-          const dy = Math.abs(pos.y - mouseDownPos.y);
-          if (dx <= DRAG_THRESHOLD && dy <= DRAG_THRESHOLD && mouseDownIdx < 0) {
-            if (inChartArea(chart, pos.x, pos.y)) {
-              const pt = dataFromPixel(chart, pos.x, pos.y);
-              data.push(pt);
-              data.sort((a, b) => a.x - b.x);
-              chart.update('none');
-              onChanged([...data]);
+        if (hadDown) {
+          if (isDragging && dragIdx !== null && dragIdx >= 0) {
+            data.sort((a, b) => a.x - b.x);
+            if (downPointRef) selectedRef = downPointRef;
+            chart.update('none');
+            onChanged([...data]);
+            emitSelection();
+          } else {
+            const dx = Math.abs(pos.x - downPos.x);
+            const dy = Math.abs(pos.y - downPos.y);
+            if (dx <= th && dy <= th) {
+              if (downIdx >= 0 && downPointRef) {
+                if (selectedRef === downPointRef) selectedRef = null;
+                else selectedRef = downPointRef;
+                emitSelection();
+                chart.update('none');
+              } else if (downIdx < 0 && inChartArea(chart, pos.x, pos.y)) {
+                selectedRef = null;
+                emitSelection();
+                const pt = dataFromPixel(chart, pos.x, pos.y);
+                data.push(pt);
+                data.sort((a, b) => a.x - b.x);
+                chart.update('none');
+                onChanged([...data]);
+              }
             }
           }
         }
 
-        dragIdx      = null;
-        mouseDownPos = null;
-        mouseDownIdx = null;
-        isDragging   = false;
+        dragIdx         = null;
+        downPos         = null;
+        downIdx         = null;
+        downPointRef    = null;
+        isDragging      = false;
+        activePointerId = null;
+
+        if (canvas.hasPointerCapture(pid)) {
+          try { canvas.releasePointerCapture(pid); } catch (_) {}
+        }
+      };
+
+      addListener(canvas, 'pointerup', endPointer);
+      addListener(canvas, 'pointercancel', endPointer);
+
+      addListener(canvas, 'lostpointercapture', () => {
+        if (!chartRef) return;
+        if (isDragging && dragIdx !== null && dragIdx >= 0) {
+          chartRef.data.datasets[0].data.sort((a, b) => a.x - b.x);
+          chartRef.update('none');
+          onChanged([...chartRef.data.datasets[0].data]);
+        }
+        hoverIdx         = -1;
+        canvas.style.cursor = '';
+        dragIdx          = null;
+        downPos          = null;
+        downIdx          = null;
+        downPointRef     = null;
+        isDragging       = false;
+        activePointerId  = null;
       });
 
-      // ---- contextmenu (right-click): delete point ----
-      canvas.addEventListener('contextmenu', (e) => {
+      addListener(canvas, 'contextmenu', (e) => {
         e.preventDefault();
         const pos = canvasPos(canvas, e);
         const idx = nearestIdx(chart, pos.x, pos.y);
         if (idx >= 0) {
+          const removed = chart.data.datasets[0].data[idx];
           chart.data.datasets[0].data.splice(idx, 1);
+          if (selectedRef === removed) selectedRef = null;
           hoverIdx = -1;
           chart.update('none');
           onChanged([...chart.data.datasets[0].data]);
+          emitSelection();
         }
       });
 
-      // ---- mouseleave: clear hover ----
-      canvas.addEventListener('mouseleave', () => {
+      addListener(canvas, 'pointerleave', () => {
+        if (activePointerId !== null) return;
         if (hoverIdx !== -1) {
           hoverIdx = -1;
           chart.update('none');
         }
         canvas.style.cursor = '';
-        // Cancel any in-progress drag
-        if (isDragging && dragIdx >= 0) {
-          chart.data.datasets[0].data.sort((a, b) => a.x - b.x);
-          chart.update('none');
-          onChanged([...chart.data.datasets[0].data]);
-        }
-        dragIdx = null; mouseDownPos = null; mouseDownIdx = null; isDragging = false;
       });
     },
 
-    // ---- Draw hover / drag highlights over the dataset ----
     afterDatasetsDraw(chart) {
-      if (hoverIdx < 0 && !isDragging) return;
+      const idx = activeDrawIdx(chart);
+      if (idx < 0) return;
 
       const ctx    = chart.ctx;
       const data   = chart.data.datasets[0].data;
       const xScale = chart.scales.x;
       const yScale = chart.scales.y;
-      const active = isDragging ? dragIdx : hoverIdx;
 
-      if (active < 0 || active >= data.length) return;
+      if (idx >= data.length) return;
 
-      const px = xScale.getPixelForValue(data[active].x);
-      const py = yScale.getPixelForValue(data[active].y);
+      const px = xScale.getPixelForValue(data[idx].x);
+      const py = yScale.getPixelForValue(data[idx].y);
+      const selOnly = !isDragging && hoverIdx < 0 && selectedIndex() === idx;
 
       ctx.save();
       ctx.beginPath();
       ctx.arc(px, py, 9, 0, Math.PI * 2);
-      ctx.strokeStyle = isDragging ? 'rgba(33,150,243,0.9)' : 'rgba(33,150,243,0.6)';
-      ctx.lineWidth   = 2;
+      ctx.strokeStyle = isDragging
+        ? 'rgba(33,150,243,0.9)'
+        : (selOnly ? 'rgba(255,193,7,0.95)' : 'rgba(33,150,243,0.6)');
+      ctx.lineWidth = 2;
       ctx.stroke();
       ctx.restore();
+    },
+
+    /** Draw delete control above overlay lines so it stays visible. */
+    afterDraw(chart) {
+      drawDeleteHandle(chart);
+    },
+
+    afterDestroy() {
+      for (const [target, type, fn, opts] of listeners) {
+        target.removeEventListener(type, fn, opts);
+      }
+      listeners.length = 0;
+      chartRef = null;
     }
+  };
+
+  return {
+    plugin: plugin,
+    deleteSelectedSample,
+    clearSelection
   };
 }

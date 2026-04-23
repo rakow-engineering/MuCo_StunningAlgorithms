@@ -1,9 +1,0 @@
-{
-  "name": "Stunning Algorithm Workbench",
-  "short_name": "AlgoWorkbench",
-  "display": "standalone",
-  "background_color": "#1a1a2e",
-  "theme_color": "#0f3460",
-  "start_url": ".",
-  "icons": []
-}

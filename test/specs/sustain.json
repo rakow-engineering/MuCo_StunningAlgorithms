@@ -1,0 +1,92 @@
+{
+  "suite": "sustain",
+  "description": "SustainHandler: zone classification after ramp deadline. Key invariant: monitoring always waits for the full ramp deadline even if threshold was reached early.",
+  "handler": "SustainHandler",
+  "step": {
+    "op": "sustain_thresholds",
+    "after": "after_ramp",
+    "warn_below": "setpoint_mA",
+    "warn_below_threshold_percent": 100,
+    "fail_below": "nominal_mA",
+    "fail_below_threshold_percent": 100
+  },
+  "runtime_defaults": { "nominal_mA": 300, "setpoint_mA": 350 },
+  "cases": [
+    {
+      "id": "all_ok_after_deadline",
+      "description": "Current stays above setpoint after ramp deadline — all time is OK",
+      "ramp_deadline_ms": 1000,
+      "samples": [
+        { "t_ms": 0,    "I_mA": 400 },
+        { "t_ms": 500,  "I_mA": 400 },
+        { "t_ms": 1000, "I_mA": 400 },
+        { "t_ms": 2000, "I_mA": 400 },
+        { "t_ms": 3000, "I_mA": 400 }
+      ],
+      "expect": {
+        "violations": [],
+        "ctx_after_last": {
+          "ok_ms_min": 1900,
+          "warn_ms": 0,
+          "invalid_ms": 0
+        }
+      }
+    },
+    {
+      "id": "sustain_starts_at_deadline_not_early",
+      "description": "rampReachedAt=500ms but rampDeadline=1000ms — sustain must not count anything before 1000ms",
+      "ramp_deadline_ms": 1000,
+      "ramp_reached_ms": 500,
+      "samples": [
+        { "t_ms": 600,  "I_mA": 150 },
+        { "t_ms": 800,  "I_mA": 150 },
+        { "t_ms": 1000, "I_mA": 400 },
+        { "t_ms": 2000, "I_mA": 400 }
+      ],
+      "expect": {
+        "violations": [],
+        "ctx_after_last": {
+          "ok_ms_min": 900,
+          "invalid_ms": 0
+        }
+      }
+    },
+    {
+      "id": "warn_zone",
+      "description": "Current drops below setpoint (350) but stays above nominal (300) — WARN zone accumulates",
+      "ramp_deadline_ms": 0,
+      "samples": [
+        { "t_ms": 0,    "I_mA": 400 },
+        { "t_ms": 1000, "I_mA": 400 },
+        { "t_ms": 1010, "I_mA": 320 },
+        { "t_ms": 2000, "I_mA": 320 },
+        { "t_ms": 2010, "I_mA": 400 }
+      ],
+      "expect": {
+        "violations": [{ "severity": "warn", "messageKey": "below_B" }],
+        "ctx_after_last": {
+          "warn_ms_min": 900,
+          "invalid_ms": 0
+        }
+      }
+    },
+    {
+      "id": "invalid_zone",
+      "description": "Current drops below nominal (300) — INVALID zone, error violation emitted",
+      "ramp_deadline_ms": 0,
+      "samples": [
+        { "t_ms": 0,    "I_mA": 400 },
+        { "t_ms": 1000, "I_mA": 400 },
+        { "t_ms": 1010, "I_mA": 100 },
+        { "t_ms": 2000, "I_mA": 100 },
+        { "t_ms": 2010, "I_mA": 400 }
+      ],
+      "expect": {
+        "violations": [{ "severity": "error", "messageKey": "below_A" }],
+        "ctx_after_last": {
+          "invalid_ms_min": 900
+        }
+      }
+    }
+  ]
+}

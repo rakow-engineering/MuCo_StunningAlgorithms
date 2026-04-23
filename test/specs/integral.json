@@ -1,0 +1,83 @@
+{
+  "suite": "integral",
+  "description": "IntegralHandler: accumulate mA·s charge (trapezoidal, clamped at limit, cutoff below threshold) until target is met",
+  "handler": "IntegralHandler",
+  "step": {
+    "op": "charge_integral",
+    "limit_to": "setpoint_mA",
+    "current_threshold_percent": 70,
+    "completion_threshold_percent": 100,
+    "target": {
+      "duration_from": "required_duration_s",
+      "current_from": "setpoint_mA"
+    }
+  },
+  "runtime_defaults": { "nominal_mA": 300, "setpoint_mA": 350, "required_duration_s": 3.0 },
+  "cases": [
+    {
+      "id": "constant_at_setpoint",
+      "description": "Constant current at setpoint for 3 s → integral = 350 * 3 = 1050 mA·s → goal reached",
+      "accumulate_start_ms": 0,
+      "samples": [
+        { "t_ms": 0,    "I_mA": 350 },
+        { "t_ms": 1000, "I_mA": 350 },
+        { "t_ms": 2000, "I_mA": 350 },
+        { "t_ms": 3000, "I_mA": 350 },
+        { "t_ms": 3500, "I_mA": 350 }
+      ],
+      "expect": {
+        "violations": [],
+        "completedAt_ms": 3000,
+        "integral_mAs_approx": 1050
+      }
+    },
+    {
+      "id": "clamped_above_limit",
+      "description": "Current above setpoint is clamped at setpoint for integration",
+      "accumulate_start_ms": 0,
+      "samples": [
+        { "t_ms": 0,    "I_mA": 500 },
+        { "t_ms": 1000, "I_mA": 500 },
+        { "t_ms": 2000, "I_mA": 500 },
+        { "t_ms": 3000, "I_mA": 500 }
+      ],
+      "expect": {
+        "violations": [],
+        "completedAt_ms": 3000,
+        "integral_mAs_approx": 1050
+      }
+    },
+    {
+      "id": "below_cutoff_not_counted",
+      "description": "Current below 70% of setpoint (245 mA) contributes 0 to integral",
+      "accumulate_start_ms": 0,
+      "samples": [
+        { "t_ms": 0,    "I_mA": 350 },
+        { "t_ms": 2000, "I_mA": 350 },
+        { "t_ms": 2010, "I_mA": 200 },
+        { "t_ms": 3010, "I_mA": 200 },
+        { "t_ms": 3020, "I_mA": 350 },
+        { "t_ms": 4020, "I_mA": 350 }
+      ],
+      "expect": {
+        "violations": [{ "severity": "warn", "messageKey": "below_cutoff_zone" }],
+        "completedAt_ms": 4020
+      }
+    },
+    {
+      "id": "completion_threshold_80pct",
+      "description": "completion_threshold_percent=80 → target = 0.8 * 1050 = 840 mA·s, reached at 2.4 s",
+      "step_override": { "completion_threshold_percent": 80 },
+      "accumulate_start_ms": 0,
+      "samples": [
+        { "t_ms": 0,    "I_mA": 350 },
+        { "t_ms": 2400, "I_mA": 350 },
+        { "t_ms": 3000, "I_mA": 350 }
+      ],
+      "expect": {
+        "violations": [],
+        "completedAt_ms": 2400
+      }
+    }
+  ]
+}

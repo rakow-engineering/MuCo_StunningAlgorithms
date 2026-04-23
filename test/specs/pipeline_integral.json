@@ -1,0 +1,58 @@
+{
+  "suite": "pipeline_integral",
+  "description": "Full pipeline: Integral algorithm (algo 3) — glitch filter + ramp + sustain + charge_integral",
+  "algorithm": "../../algorithms/stunning_current_integral_v1.json",
+  "runtime": { "nominal_mA": 300, "setpoint_mA": 350, "required_duration_s": 3.0 },
+  "cases": [
+    {
+      "id": "pass_constant_setpoint",
+      "description": "Constant at setpoint for 3 s → charge = 350*3 = 1050 mA·s → goal reached",
+      "samples": [
+        { "t_ms": 0,    "I_mA": 0   },
+        { "t_ms": 100,  "I_mA": 50  },
+        { "t_ms": 200,  "I_mA": 360 },
+        { "t_ms": 1000, "I_mA": 360 },
+        { "t_ms": 2000, "I_mA": 360 },
+        { "t_ms": 3200, "I_mA": 360 },
+        { "t_ms": 3500, "I_mA": 360 }
+      ],
+      "expect": {
+        "ok": true,
+        "violations": []
+      }
+    },
+    {
+      "id": "fail_charge_not_reached",
+      "description": "Current drops to 0 after 1 s — integral falls short → integral_not_reached",
+      "samples": [
+        { "t_ms": 0,    "I_mA": 0   },
+        { "t_ms": 100,  "I_mA": 50  },
+        { "t_ms": 200,  "I_mA": 360 },
+        { "t_ms": 1200, "I_mA": 360 },
+        { "t_ms": 1210, "I_mA": 0   },
+        { "t_ms": 9100, "I_mA": 0   }
+      ],
+      "expect": {
+        "ok": false,
+        "violation_message_keys": ["integral_not_reached", "total_timeout"]
+      }
+    },
+    {
+      "id": "pass_with_short_glitch",
+      "description": "A 150 ms dip below nominal (within glitch limit 200 ms) is forgiven — integral not interrupted",
+      "samples": [
+        { "t_ms": 0,    "I_mA": 0   },
+        { "t_ms": 100,  "I_mA": 50  },
+        { "t_ms": 200,  "I_mA": 360 },
+        { "t_ms": 1200, "I_mA": 360 },
+        { "t_ms": 1210, "I_mA": 100 },
+        { "t_ms": 1360, "I_mA": 360 },
+        { "t_ms": 3400, "I_mA": 360 }
+      ],
+      "expect": {
+        "ok": true,
+        "violations": []
+      }
+    }
+  ]
+}

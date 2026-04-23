@@ -1,0 +1,9 @@
+{
+  "description": "Curve format spec: each curve file is a JSON object with a 'description' string and a 'samples' array. Samples are time-ordered, with t_ms (integer, milliseconds relative to start, monotonically increasing) and I_mA (number, current in milliamperes). Example: threshold reached at 500 ms before the 1 s deadline.",
+  "samples": [
+    { "t_ms": 0,    "I_mA": 0   },
+    { "t_ms": 100,  "I_mA": 50  },
+    { "t_ms": 500,  "I_mA": 360 },
+    { "t_ms": 1200, "I_mA": 360 }
+  ]
+}

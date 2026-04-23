@@ -1,0 +1,82 @@
+{
+  "suite": "ramp",
+  "description": "RampHandler: current must reach setpoint threshold within timeout window",
+  "handler": "RampHandler",
+  "step": {
+    "op": "ramp_to_threshold",
+    "threshold": "setpoint_mA",
+    "current_threshold_percent": 100,
+    "timeout_ms": 1000,
+    "ramp_start_mA": 10,
+    "count_during_ramp": false
+  },
+  "runtime_defaults": { "nominal_mA": 300, "setpoint_mA": 350 },
+  "cases": [
+    {
+      "id": "early_success",
+      "description": "Threshold reached at 500 ms (before 1 s deadline). accumulateStart = 500 ms, rampDeadline = rampStart + 1000 ms",
+      "samples": [
+        { "t_ms": 0,    "I_mA": 0   },
+        { "t_ms": 100,  "I_mA": 50  },
+        { "t_ms": 500,  "I_mA": 360 },
+        { "t_ms": 1200, "I_mA": 360 }
+      ],
+      "expect": {
+        "violations": [],
+        "ctx_after_last": {
+          "rampDeadline_ms": 1100,
+          "rampReachedAt_ms": 500,
+          "accumulateStart_ms": 500
+        }
+      }
+    },
+    {
+      "id": "deadline_hit_no_success",
+      "description": "Threshold never reached — rampDeadline and accumulateStart both at deadline",
+      "samples": [
+        { "t_ms": 0,    "I_mA": 0   },
+        { "t_ms": 100,  "I_mA": 50  },
+        { "t_ms": 1100, "I_mA": 200 },
+        { "t_ms": 1500, "I_mA": 200 }
+      ],
+      "expect": {
+        "violations": [{ "ruleId": "ramp", "severity": "error", "messageKey": "ramp_not_reached" }],
+        "ctx_after_last": {
+          "rampDeadline_ms": 1100,
+          "rampReachedAt_ms": 0,
+          "accumulateStart_ms": 1100
+        }
+      }
+    },
+    {
+      "id": "count_during_ramp",
+      "description": "count_during_ramp=true: accumulation starts at ramp start, not at threshold reach",
+      "step_override": { "count_during_ramp": true },
+      "samples": [
+        { "t_ms": 0,   "I_mA": 0   },
+        { "t_ms": 100, "I_mA": 50  },
+        { "t_ms": 600, "I_mA": 360 }
+      ],
+      "expect": {
+        "violations": [],
+        "ctx_after_last": {
+          "accumulateStart_ms": 100
+        }
+      }
+    },
+    {
+      "id": "no_ramp_start_below_threshold",
+      "description": "Current never exceeds ramp_start_mA — ramp never starts",
+      "samples": [
+        { "t_ms": 0,   "I_mA": 5 },
+        { "t_ms": 500, "I_mA": 8 }
+      ],
+      "expect": {
+        "violations": [],
+        "ctx_after_last": {
+          "rampReachedAt_ms": 0
+        }
+      }
+    }
+  ]
+}

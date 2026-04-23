@@ -254,14 +254,31 @@ select option { background: var(--surface); }
   min-height: 0;
 }
 
+.chart-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
 .chart-hint {
   font-size: 10px;
   color: var(--text-dim);
   text-align: center;
-  flex-shrink: 0;
+  margin: 0;
+  flex: 1 1 100%;
+  min-width: 0;
+  line-height: 1.35;
 }
 
 canvas { display: block; }
+
+/* Prevent the browser from scrolling/zooming the page while dragging samples */
+canvas.chart-sample-editor {
+  touch-action: none;
+}
 
 /* =========================================================================
    Algorithm Editor Modal

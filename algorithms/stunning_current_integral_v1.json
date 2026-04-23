@@ -4,12 +4,12 @@
   "display_name": "Strom-Zeit-Integral",
   "description": "Wie Standard, aber statt reiner Mindestdauer wird das Strom-Zeit-Integral (mA·s) bewertet. Strom wird auf setpoint_mA begrenzt; unterhalb 70 % dieser Grenze wird nicht integriert. Ziel: Integral >= required_duration_s × setpoint_mA.",
   "bindings": {
-    "series": "current_mA",
+    "series": "I_mA",
     "nominal_mA": "default_current_mA",
     "setpoint_mA": "current_mA",
     "required_duration_s": "time_s"
   },
-  "timebase": "relative_s_from_Time_ms",
+  "timebase": "t_ms",
   "steps": [
     {
       "id": "glitch_ignore",

@@ -1,0 +1,80 @@
+{
+  "suite": "duration",
+  "description": "DurationHandler: accumulate time where both current and prev sample are above nominal until required duration is met",
+  "handler": "DurationHandler",
+  "step": {
+    "op": "min_duration_above",
+    "threshold": "nominal_mA",
+    "duration_from": "required_duration_s",
+    "completion_threshold_percent": 100
+  },
+  "runtime_defaults": { "nominal_mA": 300, "setpoint_mA": 350, "required_duration_s": 3.0 },
+  "cases": [
+    {
+      "id": "exactly_meets_requirement",
+      "description": "3 s of continuous above-nominal current — completedAt set at the 3 s mark",
+      "accumulate_start_ms": 0,
+      "samples": [
+        { "t_ms": 0,    "I_mA": 400 },
+        { "t_ms": 1000, "I_mA": 400 },
+        { "t_ms": 2000, "I_mA": 400 },
+        { "t_ms": 3000, "I_mA": 400 },
+        { "t_ms": 3500, "I_mA": 400 }
+      ],
+      "expect": {
+        "violations": [],
+        "completedAt_ms": 3000
+      }
+    },
+    {
+      "id": "gap_pauses_accumulation",
+      "description": "A 1 s dip below nominal pauses the counter; gap warning fires when gap closes (t=3020), completion fires later at t=4020",
+      "accumulate_start_ms": 0,
+      "samples": [
+        { "t_ms": 0,    "I_mA": 400 },
+        { "t_ms": 2000, "I_mA": 400 },
+        { "t_ms": 2010, "I_mA": 100 },
+        { "t_ms": 3010, "I_mA": 400 },
+        { "t_ms": 3020, "I_mA": 400 },
+        { "t_ms": 4020, "I_mA": 400 }
+      ],
+      "expect": {
+        "violations": [{ "severity": "warn", "messageKey": "below_threshold_gap" }],
+        "completedAt_ms": 4020
+      }
+    },
+    {
+      "id": "completion_threshold_80pct",
+      "description": "completion_threshold_percent=80 with required=2.5 s → only 2.0 s needed; completion fires at t=2000",
+      "step_override": { "completion_threshold_percent": 80 },
+      "runtime": { "required_duration_s": 2.5 },
+      "accumulate_start_ms": 0,
+      "samples": [
+        { "t_ms": 0,    "I_mA": 400 },
+        { "t_ms": 2000, "I_mA": 400 },
+        { "t_ms": 3000, "I_mA": 400 }
+      ],
+      "expect": {
+        "violations": [],
+        "completedAt_ms": 2000
+      }
+    },
+    {
+      "id": "never_reached",
+      "description": "Only 1 s above nominal — duration_not_reached summary violation emitted",
+      "accumulate_start_ms": 0,
+      "samples": [
+        { "t_ms": 0,    "I_mA": 400 },
+        { "t_ms": 1000, "I_mA": 400 },
+        { "t_ms": 1010, "I_mA": 100 },
+        { "t_ms": 5000, "I_mA": 100 }
+      ],
+      "expect": {
+        "violations": [
+          { "severity": "error", "messageKey": "duration_not_reached", "isSummary": true }
+        ],
+        "completedAt_ms": null
+      }
+    }
+  ]
+}

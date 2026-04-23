@@ -387,25 +387,30 @@ export function createAlgoEditor(onChange) {
   const header = modal.querySelector('.ae-header');
   let dragOX = 0, dragOY = 0;
 
-  header.addEventListener('mousedown', e => {
+  header.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
     e.preventDefault();
+    const dragPid = e.pointerId;
     const rect = modal.getBoundingClientRect();
     dragOX = e.clientX - rect.left;
     dragOY = e.clientY - rect.top;
 
-    function onMove(e) {
-      const x = Math.max(0, Math.min(e.clientX - dragOX, window.innerWidth  - modal.offsetWidth));
-      const y = Math.max(0, Math.min(e.clientY - dragOY, window.innerHeight - modal.offsetHeight));
+    function onMove(ev) {
+      if (ev.pointerId !== dragPid) return;
+      const x = Math.max(0, Math.min(ev.clientX - dragOX, window.innerWidth  - modal.offsetWidth));
+      const y = Math.max(0, Math.min(ev.clientY - dragOY, window.innerHeight - modal.offsetHeight));
       modal.style.left = x + 'px';
       modal.style.top  = y + 'px';
     }
-    function onUp() {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup',   onUp);
+    function onUp(ev) {
+      if (ev.pointerId !== dragPid) return;
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
     }
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup',   onUp);
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
   });
 
   // ---- Logic ----

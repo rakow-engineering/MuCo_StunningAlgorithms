@@ -1,0 +1,53 @@
+{
+  "suite": "timeouts",
+  "description": "InvalidTimeoutHandler and TotalTimeoutHandler",
+  "runtime_defaults": { "nominal_mA": 300, "setpoint_mA": 350, "required_duration_s": 3.0 },
+  "cases": [
+    {
+      "id": "invalid_timeout_exceeded",
+      "description": "Cumulative INVALID time (600 ms) exceeds max_invalid_ms (500 ms) → violation",
+      "handler": "InvalidTimeoutHandler",
+      "step": { "op": "invalid_timeout", "max_invalid_s": 0.5 },
+      "invalid_ms_injected": 600,
+      "expect": {
+        "violations": [{ "severity": "error", "messageKey": "invalid_timeout", "isSummary": true }]
+      }
+    },
+    {
+      "id": "invalid_timeout_not_exceeded",
+      "description": "Cumulative INVALID time (400 ms) within max_invalid_ms (500 ms) → no violation",
+      "handler": "InvalidTimeoutHandler",
+      "step": { "op": "invalid_timeout", "max_invalid_s": 0.5 },
+      "invalid_ms_injected": 400,
+      "expect": {
+        "violations": []
+      }
+    },
+    {
+      "id": "total_timeout_exceeded",
+      "description": "Total elapsed (10 s) exceeds factor * required (3 * 3 = 9 s) → violation",
+      "handler": "TotalTimeoutHandler",
+      "step": { "op": "total_timeout", "duration_from": "required_duration_s", "factor": 3.0 },
+      "samples": [
+        { "t_ms": 0,     "I_mA": 0 },
+        { "t_ms": 10000, "I_mA": 0 }
+      ],
+      "expect": {
+        "violations": [{ "severity": "error", "messageKey": "total_timeout", "isSummary": true }]
+      }
+    },
+    {
+      "id": "total_timeout_not_exceeded",
+      "description": "Total elapsed (8 s) within factor * required (9 s) → no violation",
+      "handler": "TotalTimeoutHandler",
+      "step": { "op": "total_timeout", "duration_from": "required_duration_s", "factor": 3.0 },
+      "samples": [
+        { "t_ms": 0,    "I_mA": 0 },
+        { "t_ms": 8000, "I_mA": 0 }
+      ],
+      "expect": {
+        "violations": []
+      }
+    }
+  ]
+}

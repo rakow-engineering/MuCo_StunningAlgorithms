@@ -33,9 +33,13 @@ const CURVES = {
 };
 
 for (const [path, mod] of Object.entries(curveModules)) {
-  const id   = path.split('/').pop().replace(/\.json$/, '');
+  const filename = path.split('/').pop();
+  if (filename.startsWith('_')) continue;
+  const id  = filename.replace(/\.json$/, '');
   const name = id.split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-  CURVES[id] = { name, data: Array.isArray(mod) ? mod : mod.default };
+  const raw  = mod.default ?? mod;
+  const data = Array.isArray(raw) ? raw : (raw?.samples ?? []);
+  CURVES[id] = { name, data };
 }
 
 // ---- Algorithm registry ------------------------------------------------
@@ -95,6 +99,7 @@ const elBtnSaveCurve = document.getElementById('btn-save-curve');
 const elBtnCopy      = document.getElementById('btn-copy');
 const elBtnClear     = document.getElementById('btn-clear');
 const elBtnEditAlgo  = document.getElementById('btn-edit-algo');
+const elChartHint    = document.getElementById('chart-hint');
 const canvas         = document.getElementById('dev-chart');
 
 // ---- Header logos -------------------------------------------------------
@@ -141,7 +146,7 @@ function buildLogEntry(samples) {
     default_current_mA: state.profile.nominal_mA,
     current_mA:         state.profile.setpoint_mA,
     time_s:             state.profile.duration_s,
-    measurements: samples.map(pt => ({ time_s: pt.x, current_mA: pt.y }))
+    measurements: samples.map(pt => ({ t_ms: Math.round(pt.x * 1000), I_mA: pt.y }))
   };
 }
 
@@ -225,15 +230,28 @@ function renderResults(result) {
 
 // ---- Chart setup -------------------------------------------------------
 
+function updateChartHintText() {
+  if (!elChartHint) return;
+  const coarse = window.matchMedia('(pointer: coarse)').matches;
+  elChartHint.textContent = coarse
+    ? 'Tap empty chart: add · Tap point: select · Drag to move · Tap red × (above-left of point) to delete'
+    : 'Click empty: add · Drag point: move · Select a point, then tap the red × or right-click to delete';
+}
+
+if (elChartHint) {
+  updateChartHintText();
+  window.matchMedia('(pointer: coarse)').addEventListener('change', updateChartHintText);
+}
+
 Chart.register(evaluationOverlayPlugin);
 
-const sampleEditorPlugin = createSampleEditorPlugin((samples) => {
+const sampleEditor = createSampleEditorPlugin(() => {
   reEvaluate();
 });
 
 const chart = new Chart(canvas, {
   type: 'scatter',
-  plugins: [sampleEditorPlugin],
+  plugins: [sampleEditor.plugin],
   data: {
     datasets: [{
       label: 'Current (mA)',
@@ -327,11 +345,12 @@ elShowProgress.addEventListener('change', reEvaluate);
 
 function curvePoints(id) {
   const curve = CURVES[id];
-  if (!curve) return buildDefaultSamples(state.profile.setpoint_mA);
-  return (curve.data ?? buildDefaultSamples(state.profile.setpoint_mA)).map(p => ({ x: p.x, y: p.y }));
+  const data  = curve?.data ?? buildDefaultSamples(state.profile.setpoint_mA);
+  return data.map(p => p.t_ms != null ? { x: p.t_ms / 1000, y: p.I_mA } : { x: p.x, y: p.y });
 }
 
 function loadCurve(id) {
+  sampleEditor.clearSelection();
   chart.data.datasets[0].data = curvePoints(id);
   chart.update('none');
   reEvaluate();
@@ -348,10 +367,11 @@ elBtnSaveCurve.addEventListener('click', () => {
   const name     = raw.trim();
   const id       = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, '');
   const filename = `${id || 'curve'}.json`;
-  const points   = chart.data.datasets[0].data.map(p => ({ x: p.x, y: p.y }));
+  const points   = chart.data.datasets[0].data.map(p => ({ t_ms: Math.round(p.x * 1000), I_mA: p.y }));
+  const curveObj = { description: name, samples: points };
 
   // Download so the user can drop it into curves/
-  const blob = new Blob([JSON.stringify(points, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify(curveObj, null, 2)], { type: 'application/json' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   a.href     = url;
@@ -361,7 +381,7 @@ elBtnSaveCurve.addEventListener('click', () => {
 
   // Add to in-memory registry + dropdown for this session
   const effectiveId = id || 'curve';
-  CURVES[effectiveId] = { name, data: points };
+  CURVES[effectiveId] = { name, data: points };   // points are already {t_ms, I_mA}
   if (!elCurveSelect.querySelector(`option[value="${effectiveId}"]`)) {
     const opt       = document.createElement('option');
     opt.value       = effectiveId;
@@ -375,6 +395,7 @@ elBtnSaveCurve.addEventListener('click', () => {
 // ---- Action buttons ----------------------------------------------------
 
 elBtnReset.addEventListener('click', () => {
+  sampleEditor.clearSelection();
   chart.data.datasets[0].data = curvePoints(state.curveId);
   chart.update('none');
   reEvaluate();
@@ -385,9 +406,16 @@ elBtnReset.addEventListener('click', () => {
 function samplesFromClipboardText(text) {
   try {
     const parsed = JSON.parse(text);
-    if (!Array.isArray(parsed) || parsed.length < 2) return null;
-    if (!parsed.every(p => typeof p.x === 'number' && typeof p.y === 'number')) return null;
-    return parsed;
+    // {description, samples} wrapper (curve file format)
+    const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.samples) ? parsed.samples : null);
+    if (!arr || arr.length < 2) return null;
+    if (arr.every(p => typeof p.t_ms === 'number' && typeof p.I_mA === 'number')) {
+      return arr.map(p => ({ x: p.t_ms / 1000, y: p.I_mA }));
+    }
+    if (arr.every(p => typeof p.x === 'number' && typeof p.y === 'number')) {
+      return arr;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -395,7 +423,11 @@ function samplesFromClipboardText(text) {
 
 elBtnCopy.addEventListener('click', () => {
   const samples = chart.data.datasets[0].data;
-  const text = JSON.stringify(samples.map(p => ({ x: p.x, y: p.y })), null, 2);
+  const curveObj = {
+    description: CURVES[state.curveId]?.name ?? 'curve',
+    samples: samples.map(p => ({ t_ms: Math.round(p.x * 1000), I_mA: p.y }))
+  };
+  const text = JSON.stringify(curveObj, null, 2);
   navigator.clipboard.writeText(text).then(() => {
     const prev = elBtnCopy.textContent;
     elBtnCopy.textContent = 'Copied!';
@@ -412,12 +444,14 @@ document.addEventListener('keydown', async (e) => {
   if (!text) return;
   const samples = samplesFromClipboardText(text);
   if (!samples) return;
+  sampleEditor.clearSelection();
   chart.data.datasets[0].data = samples;
   chart.update('none');
   reEvaluate();
 });
 
 elBtnClear.addEventListener('click', () => {
+  sampleEditor.clearSelection();
   chart.data.datasets[0].data = [];
   chart.update('none');
   reEvaluate();

@@ -1,0 +1,11 @@
+{
+  "scripts": {
+    "postinstall": "npm install --prefix dev-app && npm install --prefix test",
+    "dev":        "npm run dev        --prefix dev-app",
+    "build":      "npm run build      --prefix dev-app",
+    "build:file": "npm run build:file --prefix dev-app",
+    "preview":    "npm run preview    --prefix dev-app",
+    "test":       "npm test           --prefix test",
+    "test:watch": "npm run test:watch --prefix test"
+  }
+}

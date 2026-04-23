@@ -68,8 +68,8 @@ export function normalizeMeasurements(logEntry) {
 
   if (Array.isArray(m)) {
     return m.map(pt => ({
-      t: parseFloat(pt.time_s ?? 0),
-      I: parseFloat(pt.current_mA ?? 0)
+      t: pt.t_ms != null ? pt.t_ms / 1000 : parseFloat(pt.time_s ?? 0),
+      I: pt.I_mA  != null ? pt.I_mA        : parseFloat(pt.current_mA ?? 0)
     }));
   }
 
@@ -696,6 +696,19 @@ function createHandler(step, A, B, bindings, logEntry) {
  * @param {Object} spec     - Algorithm spec JSON (from the registry)
  * @returns {{ ok: boolean, violations: Array, meta: Object, thresholds: { A: number, B: number } }}
  */
+// ---------------------------------------------------------------------------
+// Named handler exports — one per step op, consistent with C prefix names
+// ---------------------------------------------------------------------------
+export {
+  createGlitchIgnoreHandler   as GlitchHandler,
+  createRampHandler           as RampHandler,
+  createSustainHandler        as SustainHandler,
+  createDurationHandler       as DurationHandler,
+  createIntegralHandler       as IntegralHandler,
+  createInvalidTimeoutHandler as InvalidTimeoutHandler,
+  createTotalTimeoutHandler   as TotalTimeoutHandler,
+};
+
 export function evaluate(logEntry, spec) {
   if (!logEntry || !spec) {
     return { ok: false, violations: [], meta: {}, thresholds: { A: 0, B: 0 } };
