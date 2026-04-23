@@ -1,12 +1,12 @@
 /* Auto-generated from 1 -- DO NOT EDIT
- * Embedded V10: Rampe 1s, Mindestdauer >= nominal
+ * Embedded V10
  */
 #include "stunning_algo_1.h"
 
 const StunningAlgoConfig_t STUNNING_ALGO_1 = {
     .meta = {
         .id           = 1u,
-        .display_name = "Embedded V10: Rampe 1s, Mindestdauer >= nominal",
+        .display_name = "Embedded V10",
     },
     .glitch = {
         .enabled    = false,
@@ -20,17 +20,20 @@ const StunningAlgoConfig_t STUNNING_ALGO_1 = {
         .count_during      = false,
     },
     .sustain = {
+        .enabled          = true,
         .warn_use_nominal = false,
         .warn_percent     = 100u,
         .fail_use_nominal = true,
         .fail_percent     = 100u,
     },
     .completion = {
-        .use_duration = true,
-        .use_integral = false,
+        .use_duration               = true,
+        .duration_threshold_percent = 100u,
+        .use_integral               = false,
         .integral = {
-            .limit_to_nominal = false,
-            .cutoff_percent   = 70u,
+            .limit_to_nominal             = false,
+            .cutoff_percent               = 70u,
+            .completion_threshold_percent = 100u,
         },
     },
     .timeouts = {

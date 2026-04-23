@@ -15,6 +15,7 @@
       "id": "glitch_ignore",
       "op": "glitch_ignore",
       "type": "filter",
+      "enabled": true,
       "ref": "nominal_mA",
       "max_gap_ms": 100
     },
@@ -32,6 +33,7 @@
       "id": "sustain",
       "op": "sustain_thresholds",
       "type": "monitor",
+      "enabled": true,
       "after": "after_ramp",
       "warn_below": "setpoint_mA",
       "warn_below_threshold_percent": 100,
@@ -42,19 +44,23 @@
       "id": "duration",
       "op": "min_duration_above",
       "type": "completion",
+      "enabled": true,
       "threshold": "nominal_mA",
-      "duration_from": "required_duration_s"
+      "duration_from": "required_duration_s",
+      "completion_threshold_percent": 100
     },
     {
       "id": "invalid_check",
       "op": "invalid_timeout",
       "type": "completion",
+      "enabled": true,
       "max_invalid_s": 0.5
     },
     {
       "id": "total_check",
       "op": "total_timeout",
       "type": "completion",
+      "enabled": true,
       "duration_from": "required_duration_s",
       "factor": 3.0
     }

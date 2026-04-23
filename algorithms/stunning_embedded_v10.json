@@ -28,9 +28,10 @@
       "_note": "Näherung: StunningResult.c startet das 1s-Fenster bei setup()-Aufruf (total_elapsed_ms-Zähler), nicht bei I>0. DELAY_AFTER_HV_RELAIS_MODE_CHANGE_ms ist in diesem Spec nicht abgebildet. Ramp-Fail-Flag wird gesetzt, hat aber im C-Code keinen eigenen Fehlerpfad — die Auswertung läuft weiter."
     },
     {
-      "id":   "sustain",
-      "op":   "sustain_thresholds",
-      "type": "monitor",
+      "id":      "sustain",
+      "op":      "sustain_thresholds",
+      "type":    "monitor",
+      "enabled": true,
       "after": "after_ramp",
       "warn_below":                    "setpoint_mA",
       "warn_below_threshold_percent":  100,
@@ -39,24 +40,28 @@
       "_note": "Entspricht der Zonenklassifikation in StunningResult.c: AREA OK ≥ setpoint, AREA TOLERATED ≥ nominal < setpoint, AREA INVALID < nominal. In StunningResult.c setzt auch AREA INVALID das Ergebnis auf UNSHURE (nicht nur TOLERATED). Dieser Unterschied wirkt sich nur aus wenn INVALID auftritt aber timeout_no_load noch nicht überschritten wird."
     },
     {
-      "id":        "duration",
-      "op":        "min_duration_above",
-      "type":      "completion",
-      "threshold":     "nominal_mA",
-      "duration_from": "required_duration_s",
+      "id":      "duration",
+      "op":      "min_duration_above",
+      "type":    "completion",
+      "enabled": true,
+      "threshold":                    "nominal_mA",
+      "duration_from":                "required_duration_s",
+      "completion_threshold_percent": 100,
       "_note": "Entspricht stunning_elapsed_ms in StunningResult.c: zählt Zeit mit I ≥ nominal_mA (AREA OK + AREA TOLERATED). Zähler pausiert bei AREA INVALID, setzt aber nicht zurück."
     },
     {
-      "id":           "invalid_check",
-      "op":           "invalid_timeout",
-      "type":         "completion",
+      "id":      "invalid_check",
+      "op":      "invalid_timeout",
+      "type":    "completion",
+      "enabled": true,
       "max_invalid_s": 0.5,
       "_note": "Entspricht: INVALID_elapsed_ms > EQ_Properties.timeout_no_load_ms. Wert ist equipment-spezifisch (EQ_Properties), hier als typischer Default. In StunningResult.c setzt INVALID_elapsed_ms bei Rückkehr in VALID/TOLERATED zurück — im Batch-Modell wird kumuliert."
     },
     {
-      "id":              "total_check",
-      "op":              "total_timeout",
-      "type":            "completion",
+      "id":      "total_check",
+      "op":      "total_timeout",
+      "type":    "completion",
+      "enabled": true,
       "duration_from":   "required_duration_s",
       "factor":          3.0,
       "_note": "Entspricht: total_elapsed_ms > Setpoints.timeout_ms * EQ_Properties.total_timeout_limit_factor. Faktor ist equipment-spezifisch, hier als typischer Default."

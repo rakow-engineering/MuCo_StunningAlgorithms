@@ -48,6 +48,7 @@ typedef struct {
 
     /** sustain_thresholds: zone classification after ramp */
     struct {
+        bool    enabled;          /**< false = skip zone monitoring entirely       */
         bool    warn_use_nominal; /**< false = warn ref is setpoint_mA (default)  */
                                   /**< true  = warn ref is nominal_mA             */
         uint8_t warn_percent;     /**< percent of ref value; 0 = warn disabled    */
@@ -58,13 +59,15 @@ typedef struct {
 
     /** Completion goal: exactly one of use_duration / use_integral should be true */
     struct {
-        bool use_duration; /**< min_duration_above: time >= nominal_mA     */
-        bool use_integral; /**< charge_integral: mA*s integral >= target   */
+        bool    use_duration;                 /**< min_duration_above active               */
+        uint8_t duration_threshold_percent;   /**< % of required_duration_s to reach (1-100) */
+        bool    use_integral;                 /**< charge_integral active                  */
 
         /** Parameters only used when use_integral is true */
         struct {
-            bool    limit_to_nominal; /**< false = limit to setpoint_mA (default) */
-            uint8_t cutoff_percent;   /**< percent of limit; below → not counted  */
+            bool    limit_to_nominal;           /**< false = limit to setpoint_mA (default) */
+            uint8_t cutoff_percent;             /**< percent of limit; below → not counted  */
+            uint8_t completion_threshold_percent; /**< % of target integral to reach (1-100) */
         } integral;
     } completion;
 

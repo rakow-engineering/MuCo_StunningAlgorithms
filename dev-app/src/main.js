@@ -24,6 +24,20 @@ import spec3 from '@algo/algorithms/stunning_current_integral_v1.json';
 import logoRakow       from '@algo/assets/RakowEnineering Logo.png';
 import logoFederleicht from '@algo/assets/federleicht-logo-4c_mittel.png';
 
+// ---- Curve registry ----------------------------------------------------
+
+const curveModules = import.meta.glob('../../curves/*.json', { eager: true });
+
+const CURVES = {
+  __default__: { name: 'Default', data: null }   // null → buildDefaultSamples() at load time
+};
+
+for (const [path, mod] of Object.entries(curveModules)) {
+  const id   = path.split('/').pop().replace(/\.json$/, '');
+  const name = id.split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  CURVES[id] = { name, data: Array.isArray(mod) ? mod : mod.default };
+}
+
 // ---- Algorithm registry ------------------------------------------------
 
 const SPECS = {
@@ -61,7 +75,8 @@ function buildDefaultSamples(setpoint_mA) {
 
 const state = {
   profile: { ...DEFAULT_PROFILE },
-  algoId:  String(spec1.algorithm_id)   // always string; matches elAlgo.value and SPECS key coercion
+  algoId:  String(spec1.algorithm_id),  // always string; matches elAlgo.value and SPECS key coercion
+  curveId: '__default__'
 };
 
 // ---- DOM refs ----------------------------------------------------------
@@ -74,7 +89,9 @@ const elBadge      = document.getElementById('result-badge');
 const elZoneTimes  = document.getElementById('zone-times');
 const elViolations = document.getElementById('violations');
 const elShowProgress = document.getElementById('show-progress');
+const elCurveSelect  = document.getElementById('curve-select');
 const elBtnReset     = document.getElementById('btn-reset');
+const elBtnSaveCurve = document.getElementById('btn-save-curve');
 const elBtnCopy      = document.getElementById('btn-copy');
 const elBtnClear     = document.getElementById('btn-clear');
 const elBtnEditAlgo  = document.getElementById('btn-edit-algo');
@@ -106,6 +123,16 @@ for (const spec of Object.values(SPECS)) {
   elAlgo.appendChild(opt);
 }
 elAlgo.value = String(state.algoId);
+
+// ---- Populate curve dropdown -------------------------------------------
+
+for (const [id, { name }] of Object.entries(CURVES)) {
+  const opt = document.createElement('option');
+  opt.value       = id;
+  opt.textContent = name;
+  elCurveSelect.appendChild(opt);
+}
+elCurveSelect.value = state.curveId;
 
 // ---- Build logEntry from profile + samples -----------------------------
 
@@ -296,10 +323,59 @@ elAlgo.addEventListener('change', () => {
 
 elShowProgress.addEventListener('change', reEvaluate);
 
+// ---- Curve helpers -----------------------------------------------------
+
+function curvePoints(id) {
+  const curve = CURVES[id];
+  if (!curve) return buildDefaultSamples(state.profile.setpoint_mA);
+  return (curve.data ?? buildDefaultSamples(state.profile.setpoint_mA)).map(p => ({ x: p.x, y: p.y }));
+}
+
+function loadCurve(id) {
+  chart.data.datasets[0].data = curvePoints(id);
+  chart.update('none');
+  reEvaluate();
+}
+
+elCurveSelect.addEventListener('change', () => {
+  state.curveId = elCurveSelect.value;
+  loadCurve(state.curveId);
+});
+
+elBtnSaveCurve.addEventListener('click', () => {
+  const raw = prompt('Curve name (will be used as filename):', 'my_curve');
+  if (!raw?.trim()) return;
+  const name     = raw.trim();
+  const id       = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, '');
+  const filename = `${id || 'curve'}.json`;
+  const points   = chart.data.datasets[0].data.map(p => ({ x: p.x, y: p.y }));
+
+  // Download so the user can drop it into curves/
+  const blob = new Blob([JSON.stringify(points, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  // Add to in-memory registry + dropdown for this session
+  const effectiveId = id || 'curve';
+  CURVES[effectiveId] = { name, data: points };
+  if (!elCurveSelect.querySelector(`option[value="${effectiveId}"]`)) {
+    const opt       = document.createElement('option');
+    opt.value       = effectiveId;
+    opt.textContent = name;
+    elCurveSelect.appendChild(opt);
+  }
+  elCurveSelect.value = effectiveId;
+  state.curveId       = effectiveId;
+});
+
 // ---- Action buttons ----------------------------------------------------
 
 elBtnReset.addEventListener('click', () => {
-  chart.data.datasets[0].data = buildDefaultSamples(state.profile.setpoint_mA);
+  chart.data.datasets[0].data = curvePoints(state.curveId);
   chart.update('none');
   reEvaluate();
 });
@@ -356,6 +432,25 @@ evaluationOverlayPlugin.onBadgeClick('dev-chart', (evalData) => {
   console.log('Meta:', evalData.meta);
   console.log('Violations:', evalData.violations);
   console.groupEnd();
+});
+
+// ---- Sidebar collapse toggle -------------------------------------------
+
+const elSplitter   = document.getElementById('sidebar-splitter');
+const elAside      = document.querySelector('aside');
+let   sidebarOpen  = true;
+let   savedWidth   = elAside.offsetWidth || parseInt(getComputedStyle(elAside).width) || 240;
+
+elSplitter.addEventListener('click', () => {
+  sidebarOpen = !sidebarOpen;
+  if (sidebarOpen) {
+    elAside.style.width = savedWidth + 'px';
+  } else {
+    savedWidth = elAside.offsetWidth;
+    elAside.style.width = '0';
+  }
+  elSplitter.classList.toggle('collapsed', !sidebarOpen);
+  setTimeout(() => chart.resize(), 240);
 });
 
 // ---- Initial evaluation ------------------------------------------------

@@ -15,6 +15,7 @@
       "id": "glitch_ignore",
       "op": "glitch_ignore",
       "type": "filter",
+      "enabled": true,
       "ref": "nominal_mA",
       "max_gap_ms": 200
     },
@@ -32,6 +33,7 @@
       "id": "sustain",
       "op": "sustain_thresholds",
       "type": "monitor",
+      "enabled": true,
       "after": "after_ramp",
       "warn_below": "setpoint_mA",
       "warn_below_threshold_percent": 70,
@@ -42,8 +44,10 @@
       "id": "charge_ok",
       "op": "charge_integral",
       "type": "completion",
+      "enabled": true,
       "limit_to": "setpoint_mA",
       "current_threshold_percent": 70,
+      "completion_threshold_percent": 100,
       "target": {
         "duration_from": "required_duration_s",
         "current_from": "setpoint_mA"
@@ -53,12 +57,14 @@
       "id": "invalid_check",
       "op": "invalid_timeout",
       "type": "completion",
+      "enabled": true,
       "max_invalid_s": 0.5
     },
     {
       "id": "total_check",
       "op": "total_timeout",
       "type": "completion",
+      "enabled": true,
       "duration_from": "required_duration_s",
       "factor": 3.0
     }

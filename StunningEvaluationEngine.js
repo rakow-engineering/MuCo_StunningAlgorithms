@@ -370,9 +370,11 @@ function createSustainHandler(step, A, B) {
  * Sets runtimeCtx.completedAt_s when goal is reached.
  */
 function createDurationHandler(step, A, B, bindings, logEntry) {
-  const threshold    = resolveThreshold(step.threshold, A, B);
+  const threshold     = resolveThreshold(step.threshold, A, B);
   const requiredField = step.duration_from;
-  const requiredS    = logEntry[bindings[requiredField]] ?? logEntry.time_s ?? 0;
+  const requiredS     = logEntry[bindings[requiredField]] ?? logEntry.time_s ?? 0;
+  const completionPct = (step.completion_threshold_percent ?? 100) / 100;
+  const effectiveReqS = requiredS * completionPct;
 
   let totalAbove    = 0;
   let gapStart      = null;
@@ -395,7 +397,7 @@ function createDurationHandler(step, A, B, bindings, logEntry) {
         const dtStart = Math.max(prevSample.t, accumulateStart);
         totalAbove += sample.t - dtStart;
 
-        if (completedAt_s === null && totalAbove >= requiredS) {
+        if (completedAt_s === null && totalAbove >= effectiveReqS) {
           completedAt_s = sample.t;
           runtimeCtx.completedAt_s = completedAt_s;
         }
@@ -436,14 +438,14 @@ function createDurationHandler(step, A, B, bindings, logEntry) {
         });
       }
 
-      if (totalAbove < requiredS) {
+      if (totalAbove < effectiveReqS) {
         violations.push({
           ruleId: step.id, severity: 'error',
           tStart_s: 0, tEnd_s: lastSample?.t ?? 0,
           messageKey: 'duration_not_reached',
           isSummary: true,
           details: {
-            required_s:   requiredS,
+            required_s:   effectiveReqS,
             actual_s:     Math.round(totalAbove * 100) / 100,
             threshold_mA: threshold
           }
@@ -454,10 +456,11 @@ function createDurationHandler(step, A, B, bindings, logEntry) {
       return {
         violations,
         meta: {
-          totalAbove_s: totalAbove,
-          required_s:   requiredS,
+          totalAbove_s:  totalAbove,
+          required_s:    requiredS,
           completedAt_s,
           durationSeries,
+          durationCompletionPct: Math.round(completionPct * 100),
           stunning_accumulate_start_s: accumulateStart
         }
       };
@@ -482,6 +485,8 @@ function createIntegralHandler(step, A, B, bindings, logEntry) {
   const requiredS    = logEntry[bindings[target.duration_from]] ?? logEntry.time_s ?? 0;
   const requiredI    = logEntry[bindings[target.current_from]]  ?? logEntry.current_mA ?? 0;
   const targetIntegral = requiredS * requiredI;
+  const completionPct  = (step.completion_threshold_percent ?? 100) / 100;
+  const effectiveTarget = targetIntegral * completionPct;
 
   let integral      = 0;
   let deadStart     = null;
@@ -515,7 +520,7 @@ function createIntegralHandler(step, A, B, bindings, logEntry) {
         pct: targetIntegral > 0 ? Math.min(integral / targetIntegral, 1) * 100 : 0
       });
 
-      if (completedAt_s === null && integral >= targetIntegral) {
+      if (completedAt_s === null && integral >= effectiveTarget) {
         completedAt_s = sample.t;
         runtimeCtx.completedAt_s = completedAt_s;
       }
@@ -549,16 +554,16 @@ function createIntegralHandler(step, A, B, bindings, logEntry) {
         });
       }
 
-      if (integral < targetIntegral) {
+      if (integral < effectiveTarget) {
         violations.push({
           ruleId: step.id, severity: 'error',
           tStart_s: 0, tEnd_s: lastSample?.t ?? 0,
           messageKey: 'integral_not_reached',
           isSummary: true,
           details: {
-            target_mAs:    Math.round(targetIntegral * 10) / 10,
-            actual_mAs:    Math.round(integral       * 10) / 10,
-            limitTo:       step.limit_to ?? 'setpoint_mA',
+            target_mAs:     Math.round(effectiveTarget * 10) / 10,
+            actual_mAs:     Math.round(integral        * 10) / 10,
+            limitTo:        step.limit_to ?? 'setpoint_mA',
             cutoff_percent: cutoffPercent
           }
         });
@@ -568,9 +573,11 @@ function createIntegralHandler(step, A, B, bindings, logEntry) {
       return {
         violations,
         meta: {
-          integral_mAs:  integral,
-          target_mAs:    targetIntegral,
+          integral_mAs:         integral,
+          target_mAs:           targetIntegral,
+          charge_integral_mAs:  integral,
           integralSeries,
+          integralCompletionPct: Math.round(completionPct * 100),
           completedAt_s,
           stunning_accumulate_start_s: accumulateStart
         }
@@ -718,11 +725,13 @@ export function evaluate(logEntry, spec) {
     runtimeCtx.hasRampStep = true;
   }
 
-  // Create one handler per step
-  const handlers = (spec.steps || []).map(step => ({
-    step,
-    handler: createHandler(step, A, B, bindings, logEntry)
-  }));
+  // Create one handler per enabled step (startup steps always run; others respect enabled flag)
+  const handlers = (spec.steps || [])
+    .filter(step => step.enabled !== false)
+    .map(step => ({
+      step,
+      handler: createHandler(step, A, B, bindings, logEntry)
+    }));
 
   // ---- Sample-by-sample processing ----------------------------------------
   // Every sample is fed through all handlers in step order before the next
@@ -787,6 +796,7 @@ export function evaluate(logEntry, spec) {
     overlayHints.completedAt_s = allMeta.completedAt_s;
   }
   for (const step of (spec.steps || [])) {
+    if (step.enabled === false) continue;
     if (step.op === 'sustain_thresholds') {
       const warnPct = step.warn_below_threshold_percent;
       const failPct = step.fail_below_threshold_percent;
@@ -800,13 +810,15 @@ export function evaluate(logEntry, spec) {
       overlayHints.warnBelowPercent = warnPct;
     }
     if (step.op === 'min_duration_above') {
-      overlayHints.durationSeries = allMeta.durationSeries ?? null;
+      overlayHints.durationSeries        = allMeta.durationSeries ?? null;
+      overlayHints.durationThresholdPct  = allMeta.durationCompletionPct ?? 100;
     }
     if (step.op === 'charge_integral') {
       const limitVal = resolveThreshold(step.limit_to ?? 'setpoint_mA', A, B);
       const cutPct   = step.current_threshold_percent ?? 70;
-      overlayHints.integralCutoff_mA = (cutPct / 100) * limitVal;
-      overlayHints.integralSeries    = allMeta.integralSeries ?? null;
+      overlayHints.integralCutoff_mA    = (cutPct / 100) * limitVal;
+      overlayHints.integralSeries       = allMeta.integralSeries ?? null;
+      overlayHints.integralThresholdPct = allMeta.integralCompletionPct ?? 100;
     }
   }
 

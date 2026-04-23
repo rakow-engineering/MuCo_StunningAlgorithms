@@ -34,6 +34,32 @@ const AFTER_OPTIONS = [
   { value: 'first_above_A', label: 'First above Nominal' },
 ];
 
+/** Canonical order for the completion tab. */
+const COMPLETION_OPS = ['min_duration_above', 'charge_integral', 'invalid_timeout', 'total_timeout'];
+
+/** Default field values used when a completion step is absent from the spec. */
+const COMPLETION_DEFAULTS = {
+  min_duration_above: {
+    id: 'duration', op: 'min_duration_above', type: 'completion', enabled: false,
+    threshold: 'nominal_mA', duration_from: 'required_duration_s',
+    completion_threshold_percent: 100,
+  },
+  charge_integral: {
+    id: 'charge_ok', op: 'charge_integral', type: 'completion', enabled: false,
+    limit_to: 'setpoint_mA', current_threshold_percent: 70,
+    completion_threshold_percent: 100,
+    target: { duration_from: 'required_duration_s', current_from: 'setpoint_mA' },
+  },
+  invalid_timeout: {
+    id: 'invalid_check', op: 'invalid_timeout', type: 'completion', enabled: false,
+    max_invalid_s: 0.5,
+  },
+  total_timeout: {
+    id: 'total_check', op: 'total_timeout', type: 'completion', enabled: false,
+    duration_from: 'required_duration_s', factor: 3.0,
+  },
+};
+
 /** Field descriptors per op. */
 function stepFields(op) {
   switch (op) {
@@ -60,15 +86,17 @@ function stepFields(op) {
       ];
     case 'min_duration_above':
       return [
-        { key: 'threshold',    label: 'Threshold',        type: 'binding', options: CURRENT_BINDINGS },
-        { key: 'duration_from',label: 'Required duration', type: 'binding', options: DURATION_BINDINGS },
+        { key: 'threshold',                    label: 'Threshold',              type: 'binding', options: CURRENT_BINDINGS },
+        { key: 'duration_from',                label: 'Required duration',      type: 'binding', options: DURATION_BINDINGS },
+        { key: 'completion_threshold_percent', label: 'Completion threshold (%)', type: 'int',   min: 1, max: 100, unit: '%' },
       ];
     case 'charge_integral':
       return [
-        { key: 'limit_to',                  label: 'Clamp at',        type: 'binding', options: CURRENT_BINDINGS },
-        { key: 'current_threshold_percent', label: 'Cutoff (%)',      type: 'int',     min: 1, max: 100, unit: '%' },
-        { key: 'target.duration_from',      label: 'Target duration', type: 'binding', options: DURATION_BINDINGS },
-        { key: 'target.current_from',       label: 'Target current',  type: 'binding', options: CURRENT_BINDINGS },
+        { key: 'limit_to',                     label: 'Clamp at',                type: 'binding', options: CURRENT_BINDINGS },
+        { key: 'current_threshold_percent',    label: 'Cutoff (%)',              type: 'int',     min: 1, max: 100, unit: '%' },
+        { key: 'target.duration_from',         label: 'Target duration',         type: 'binding', options: DURATION_BINDINGS },
+        { key: 'target.current_from',          label: 'Target current',          type: 'binding', options: CURRENT_BINDINGS },
+        { key: 'completion_threshold_percent', label: 'Completion threshold (%)', type: 'int',    min: 1, max: 100, unit: '%' },
       ];
     case 'invalid_timeout':
       return [
@@ -260,8 +288,9 @@ function renderField(step, field, onChange) {
 // Step card
 // ---------------------------------------------------------------------------
 
-function renderStep(step, onChange) {
-  const fields = stepFields(step.op);
+function renderStep(step, onChange, canDisable = null) {
+  const fields    = stepFields(step.op);
+  const isStartup = step.type === 'startup';
 
   const opEl = document.createElement('span');
   opEl.className = 'ae-step-op';
@@ -271,8 +300,32 @@ function renderStep(step, onChange) {
   idEl.className = 'ae-step-id';
   idEl.textContent = `id: ${step.id}`;
 
-  const head = div('ae-step-header', opEl, idEl);
   const body = div('ae-step-body', ...fields.map(f => renderField(step, f, onChange)));
+
+  let head;
+  if (isStartup) {
+    head = div('ae-step-header', opEl, idEl);
+  } else {
+    const enabled = step.enabled !== false;
+    body.classList.toggle('ae-body-disabled', !enabled);
+
+    const cb = document.createElement('input');
+    cb.type      = 'checkbox';
+    cb.className = 'ae-checkbox';
+    cb.checked   = enabled;
+    cb.addEventListener('change', () => {
+      if (!cb.checked && canDisable && !canDisable()) {
+        cb.checked = true;
+        return;
+      }
+      step.enabled = cb.checked;
+      body.classList.toggle('ae-body-disabled', !cb.checked);
+      onChange();
+    });
+
+    head = div('ae-step-header', cb, opEl, idEl);
+  }
+
   return div('ae-step', head, body);
 }
 
@@ -369,15 +422,30 @@ export function createAlgoEditor(onChange) {
     content.innerHTML = '';
     if (!workingSpec) return;
 
-    const steps = (workingSpec.steps ?? []).filter(s => s.type === activeCategory);
+    let steps = (workingSpec.steps ?? []).filter(s => s.type === activeCategory);
+
+    if (activeCategory === 'completion') {
+      // Sort by canonical op order; all 4 are always present after open()
+      const opOrder = Object.fromEntries(COMPLETION_OPS.map((op, i) => [op, i]));
+      steps = steps.slice().sort((a, b) => (opOrder[a.op] ?? 99) - (opOrder[b.op] ?? 99));
+    }
+
     if (steps.length === 0) {
       const msg = div('ae-empty');
       msg.textContent = 'No steps in this category.';
       content.appendChild(msg);
       return;
     }
+
     const notify = () => onChange(workingSpec);
-    steps.forEach(s => content.appendChild(renderStep(s, notify)));
+
+    if (activeCategory === 'completion') {
+      // Guard: at least one completion step must remain enabled
+      const canDisable = () => steps.filter(s => s.enabled !== false).length > 1;
+      steps.forEach(s => content.appendChild(renderStep(s, notify, canDisable)));
+    } else {
+      steps.forEach(s => content.appendChild(renderStep(s, notify)));
+    }
   }
 
   function download() {
@@ -394,6 +462,15 @@ export function createAlgoEditor(onChange) {
 
   function open(spec) {
     workingSpec = JSON.parse(JSON.stringify(spec)); // deep clone
+    if (!workingSpec.steps) workingSpec.steps = [];
+
+    // Inject any missing completion steps as disabled placeholders
+    for (const op of COMPLETION_OPS) {
+      if (!workingSpec.steps.some(s => s.op === op)) {
+        workingSpec.steps.push(JSON.parse(JSON.stringify(COMPLETION_DEFAULTS[op])));
+      }
+    }
+
     titleEl.textContent = spec.display_name ?? `Algorithm ${spec.algorithm_id}`;
     selectTab(activeCategory);
     overlay.classList.add('ae-visible');

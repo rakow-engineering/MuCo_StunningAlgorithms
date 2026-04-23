@@ -57,6 +57,10 @@ def _pct_or_0(step, key, default=100):
     v = step.get(key, default)
     return 0 if v is None else int(v)
 
+def _step_enabled(step):
+    """Return True if step exists and is not explicitly disabled."""
+    return bool(step) and step.get('enabled', True) is not False
+
 def _escape_c_string(s):
     """Escape a Python unicode string for use inside a C string literal."""
     return s.replace('\\', '\\\\').replace('"', '\\"')
@@ -120,7 +124,7 @@ def generate_config_c(spec):
     L.append(u'    },')
 
     L.append(u'    .glitch = {')
-    L.append(u'        .enabled    = {0},'.format(_bool(bool(merge))))
+    L.append(u'        .enabled    = {0},'.format(_bool(_step_enabled(merge))))
     L.append(u'        .max_gap_ms = {0},'.format(int(merge.get('max_gap_ms', 100)) if merge else 0))
     L.append(u'    },')
 
@@ -135,6 +139,7 @@ def generate_config_c(spec):
     warn_ref = sustain.get('warn_below', 'setpoint_mA') if sustain else 'setpoint_mA'
     fail_ref = sustain.get('fail_below', 'nominal_mA')  if sustain else 'nominal_mA'
     L.append(u'    .sustain = {')
+    L.append(u'        .enabled          = {0},'.format(_bool(_step_enabled(sustain))))
     L.append(u'        .warn_use_nominal = {0},'.format(_bool(warn_ref == 'nominal_mA')))
     L.append(u'        .warn_percent     = {0}u,'.format(_pct_or_0(sustain, 'warn_below_threshold_percent', 100) if sustain else 0))
     L.append(u'        .fail_use_nominal = {0},'.format(_bool(fail_ref == 'nominal_mA')))
@@ -142,11 +147,13 @@ def generate_config_c(spec):
     L.append(u'    },')
 
     L.append(u'    .completion = {')
-    L.append(u'        .use_duration = {0},'.format(_bool(bool(duration))))
-    L.append(u'        .use_integral = {0},'.format(_bool(bool(integral))))
+    L.append(u'        .use_duration               = {0},'.format(_bool(_step_enabled(duration))))
+    L.append(u'        .duration_threshold_percent = {0}u,'.format(int(duration.get('completion_threshold_percent', 100)) if duration else 100))
+    L.append(u'        .use_integral               = {0},'.format(_bool(_step_enabled(integral))))
     L.append(u'        .integral = {')
-    L.append(u'            .limit_to_nominal = {0},'.format(_bool(limit_to_nominal)))
-    L.append(u'            .cutoff_percent   = {0}u,'.format(int(integral.get('current_threshold_percent', 70)) if integral else 70))
+    L.append(u'            .limit_to_nominal             = {0},'.format(_bool(limit_to_nominal)))
+    L.append(u'            .cutoff_percent               = {0}u,'.format(int(integral.get('current_threshold_percent', 70)) if integral else 70))
+    L.append(u'            .completion_threshold_percent = {0}u,'.format(int(integral.get('completion_threshold_percent', 100)) if integral else 100))
     L.append(u'        },')
     L.append(u'    },')
 

@@ -21,10 +21,18 @@ body {
   font-size: 13px;
   background: var(--bg);
   color: var(--text);
-  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+@media (max-width: 600px) {
+  header { display: none; }
 }
 
 /* ---- Header ---- */
@@ -40,6 +48,37 @@ header {
 header h1 { font-size: 14px; font-weight: 600; letter-spacing: 0.03em; }
 header .subtitle { color: var(--text-dim); font-size: 11px; }
 
+.header-algo {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.header-algo > span {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.header-algo select {
+  width: auto;
+  min-width: 160px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.header-btn {
+  padding: 4px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s;
+}
+.header-btn:hover { background: #1a3a5c; }
+
 /* ---- Main layout ---- */
 .workspace {
   display: flex;
@@ -50,12 +89,43 @@ header .subtitle { color: var(--text-dim); font-size: 11px; }
 /* ---- Sidebar ---- */
 aside {
   width: var(--sidebar-w);
+  min-width: 0;
   background: var(--surface);
-  border-right: 1px solid var(--border);
+  border-right: none;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
   flex-shrink: 0;
+  transition: width 0.22s ease;
+}
+
+/* ---- Sidebar toggle ---- */
+.splitter {
+  width: 14px;
+  background: var(--surface2);
+  border-left:  1px solid var(--border);
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  transition: background 0.15s;
+}
+.splitter:hover { background: #1a3a5c; }
+.splitter::after {
+  content: '‹';
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+.splitter:hover::after { color: var(--text); }
+.splitter.collapsed::after { content: '›'; }
+.splitter:hover::after,
+.splitter.splitter-active::after {
+  background: rgba(255,255,255,0.5);
 }
 
 .panel {
@@ -318,11 +388,17 @@ canvas { display: block; }
   color: var(--text-dim);
   font-family: monospace;
 }
+
 .ae-step-body {
   padding: 8px 12px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  transition: opacity 0.15s;
+}
+.ae-body-disabled {
+  opacity: 0.35;
+  pointer-events: none;
 }
 
 /* Field rows */

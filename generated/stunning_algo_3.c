@@ -1,12 +1,12 @@
 /* Auto-generated from 3 -- DO NOT EDIT
- * Integral: Rampe, Schwellen nominal/setpoint, Strom-Zeit-Integral
+ * Strom-Zeit-Integral
  */
 #include "stunning_algo_3.h"
 
 const StunningAlgoConfig_t STUNNING_ALGO_3 = {
     .meta = {
         .id           = 3u,
-        .display_name = "Integral: Rampe, Schwellen nominal/setpoint, Strom-Zeit-Integral",
+        .display_name = "Strom-Zeit-Integral",
     },
     .glitch = {
         .enabled    = true,
@@ -20,17 +20,20 @@ const StunningAlgoConfig_t STUNNING_ALGO_3 = {
         .count_during      = true,
     },
     .sustain = {
+        .enabled          = true,
         .warn_use_nominal = false,
         .warn_percent     = 70u,
         .fail_use_nominal = true,
         .fail_percent     = 0u,
     },
     .completion = {
-        .use_duration = false,
-        .use_integral = true,
+        .use_duration               = false,
+        .duration_threshold_percent = 100u,
+        .use_integral               = true,
         .integral = {
-            .limit_to_nominal = false,
-            .cutoff_percent   = 70u,
+            .limit_to_nominal             = false,
+            .cutoff_percent               = 70u,
+            .completion_threshold_percent = 100u,
         },
     },
     .timeouts = {

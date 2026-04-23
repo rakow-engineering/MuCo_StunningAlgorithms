@@ -2,12 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#0f3460" />
+  <link rel="manifest" href="manifest.json" />
   <title>Stunning Algorithm Workbench</title>
 </head>
 <body>
   <header>
     <h1>Stunning Algorithm Workbench</h1>
+    <div class="header-algo">
+      <span>Algorithm</span>
+      <select id="algo-select"></select>
+      <button class="header-btn" id="btn-edit-algo">Edit…</button>
+    </div>
   </header>
 
   <div class="workspace">
@@ -32,22 +42,22 @@
       <!-- Algorithm -->
       <div class="panel">
         <div class="panel-title">Algorithm</div>
-        <label>
-          <span>Active algorithm</span>
-          <select id="algo-select"></select>
-        </label>
-        <label style="flex-direction:row; align-items:center; gap:6px; margin-bottom:6px">
+        <label style="flex-direction:row; align-items:center; gap:6px; margin-bottom:0">
           <input type="checkbox" id="show-progress" checked style="width:auto; margin:0" />
           <span style="color:var(--text-dim); font-size:11px">Show progress line</span>
         </label>
-        <button class="btn" id="btn-edit-algo">Edit Algorithm…</button>
       </div>
 
-      <!-- Actions -->
+      <!-- Curves -->
       <div class="panel">
-        <div class="panel-title">Samples</div>
-        <button class="btn" id="btn-reset">Reset to default</button>
-        <button class="btn" id="btn-copy">Copy samples</button>
+        <div class="panel-title">Curves</div>
+        <label>
+          <span>Active curve</span>
+          <select id="curve-select"></select>
+        </label>
+        <button class="btn" id="btn-reset">Reset curve</button>
+        <button class="btn" id="btn-save-curve">Save curve…</button>
+        <button class="btn" id="btn-copy">Copy curve</button>
         <button class="btn" id="btn-clear">Clear all</button>
       </div>
 
@@ -59,6 +69,8 @@
         <div id="violations"></div>
       </div>
     </aside>
+
+    <div id="sidebar-splitter" class="splitter"></div>
 
     <!-- Chart -->
     <div class="chart-area">

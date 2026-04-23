@@ -20,8 +20,10 @@ const COLORS = {
   lineBRef: 'rgba(255, 152, 0, 0.35)',
   bandError: 'rgba(220, 53, 69, 0.22)',
   bandWarn: 'rgba(255, 193, 7, 0.25)',
+  bandCompletion: 'rgba(160, 160, 160, 0.18)',
   markerError: 'rgba(220, 53, 69, 0.9)',
   markerWarn: 'rgba(255, 152, 0, 0.9)',
+  markerCompletion: 'rgba(160, 160, 160, 0.75)',
   rampLine: 'rgba(33, 150, 243, 0.7)',
   rampBand: 'rgba(33, 150, 243, 0.06)',
   rampReached: 'rgba(76, 175, 80, 0.7)',
@@ -212,7 +214,7 @@ function friendlyThresholdName(bindingName) {
 // Integral progress line + right-side % axis
 // ---------------------------------------------------------------------------
 
-function drawIntegralProgress(ctx, series, chartArea, xScale) {
+function drawIntegralProgress(ctx, series, chartArea, xScale, thresholdPct = 100) {
   if (!series || series.length === 0) return;
 
   const chartH = chartArea.bottom - chartArea.top;
@@ -243,6 +245,21 @@ function drawIntegralProgress(ctx, series, chartArea, xScale) {
     ctx.stroke();
     ctx.fillText(`${pct}%`, axisX + tickLen + 2, y);
   }
+
+  // Threshold tick (when not 100%)
+  if (thresholdPct !== 100) {
+    const yTh = pctToY(thresholdPct);
+    ctx.strokeStyle = 'rgba(160,160,160,0.85)';
+    ctx.fillStyle   = 'rgba(160,160,160,0.85)';
+    ctx.lineWidth   = 1.5;
+    ctx.setLineDash([3, 2]);
+    ctx.beginPath();
+    ctx.moveTo(chartArea.left, yTh);
+    ctx.lineTo(chartArea.right, yTh);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillText(`${thresholdPct}%✓`, axisX + tickLen + 2, yTh);
+  }
   ctx.restore();
 
   // Progress line (clipped to chart area)
@@ -266,7 +283,7 @@ function drawIntegralProgress(ctx, series, chartArea, xScale) {
   ctx.restore();
 }
 
-function drawDurationProgress(ctx, series, chartArea, xScale) {
+function drawDurationProgress(ctx, series, chartArea, xScale, thresholdPct = 100) {
   if (!series || series.length === 0) return;
 
   const chartH = chartArea.bottom - chartArea.top;
@@ -296,6 +313,21 @@ function drawDurationProgress(ctx, series, chartArea, xScale) {
     ctx.lineTo(axisX + tickLen, y);
     ctx.stroke();
     ctx.fillText(`${pct}%`, axisX + tickLen + 2, y);
+  }
+
+  // Threshold tick (when not 100%)
+  if (thresholdPct !== 100) {
+    const yTh = pctToY(thresholdPct);
+    ctx.strokeStyle = 'rgba(160,160,160,0.85)';
+    ctx.fillStyle   = 'rgba(160,160,160,0.85)';
+    ctx.lineWidth   = 1.5;
+    ctx.setLineDash([3, 2]);
+    ctx.beginPath();
+    ctx.moveTo(chartArea.left, yTh);
+    ctx.lineTo(chartArea.right, yTh);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillText(`${thresholdPct}%✓`, axisX + tickLen + 2, yTh);
   }
   ctx.restore();
 
@@ -388,18 +420,21 @@ const evaluationOverlayPlugin = {
 
     // 2. Progress lines + right % axis
     if (hints.integralSeries?.length > 0) {
-      drawIntegralProgress(ctx, hints.integralSeries, chartArea, xScale);
+      drawIntegralProgress(ctx, hints.integralSeries, chartArea, xScale, hints.integralThresholdPct ?? 100);
     }
     if (hints.durationSeries?.length > 0) {
-      drawDurationProgress(ctx, hints.durationSeries, chartArea, xScale);
+      drawDurationProgress(ctx, hints.durationSeries, chartArea, xScale, hints.durationThresholdPct ?? 100);
     }
 
     // 3. Violation bands + markers (skip isSummary)
     for (const v of (violations || [])) {
       if (v.isSummary) continue;
 
-      const color = v.severity === 'error' ? COLORS.bandError : COLORS.bandWarn;
-      const markerColor = v.severity === 'error' ? COLORS.markerError : COLORS.markerWarn;
+      const isCompletion = v.stepType === 'completion';
+      const color       = isCompletion ? COLORS.bandCompletion
+                        : v.severity === 'error' ? COLORS.bandError : COLORS.bandWarn;
+      const markerColor = isCompletion ? COLORS.markerCompletion
+                        : v.severity === 'error' ? COLORS.markerError : COLORS.markerWarn;
       drawBand(ctx, v.tStart_s, v.tEnd_s, chartArea, xScale, color);
       drawMarker(ctx, v.tStart_s, chartArea, xScale, markerColor);
       drawMarker(ctx, v.tEnd_s, chartArea, xScale, markerColor);

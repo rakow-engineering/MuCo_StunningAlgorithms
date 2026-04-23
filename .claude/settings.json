@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(python emitStunningEvalC.py algorithms/stunning_embedded_v10.json algorithms/stunning_current_v1.json algorithms/stunning_current_integral_v1.json generated/)"
     ]
   }
 }

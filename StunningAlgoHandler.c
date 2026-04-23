@@ -136,7 +136,7 @@ STUNNING_RESULT_t StunningAlgo_update(
     /* Zone classification (sustain_thresholds) -- only after ramp ends    */
     /* Uses effective current: glitch-forgiven dips appear as hold value.  */
     /* ------------------------------------------------------------------ */
-    if (state->ramp_complete && time_ms > state->ramp_end_ms && !state->goal_reached)
+    if (cfg->sustain.enabled && state->ramp_complete && time_ms > state->ramp_end_ms && !state->goal_reached)
     {
         if (cfg->glitch.enabled && cfg->glitch.max_gap_ms > 0u)
         {
@@ -201,7 +201,8 @@ STUNNING_RESULT_t StunningAlgo_update(
 
         if (cfg->completion.use_duration)
         {
-            uint32_t required_ms = (uint32_t)(required_duration_s * 1000.0f);
+            uint32_t required_ms = (uint32_t)(required_duration_s
+                * ((float)cfg->completion.duration_threshold_percent / 100.0f) * 1000.0f);
             if (current_mA >= nominal_mA && state->prev_I >= nominal_mA)
             {
                 state->stunning_elapsed_ms += acc_dt;
@@ -218,7 +219,8 @@ STUNNING_RESULT_t StunningAlgo_update(
                               ? nominal_mA : setpoint_mA;
             float cutoff    = limit_val
                               * ((float)cfg->completion.integral.cutoff_percent / 100.0f);
-            float target    = required_duration_s * limit_val;
+            float target    = required_duration_s * limit_val
+                              * ((float)cfg->completion.integral.completion_threshold_percent / 100.0f);
             float dt_s      = (float)acc_dt / 1000.0f;
             float I0        = state->prev_I;
             float I1        = current_mA;
