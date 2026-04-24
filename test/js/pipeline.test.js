@@ -11,6 +11,17 @@ function loadSpec(relPath) {
   return JSON.parse(readFileSync(resolve(__dirname, relPath), 'utf8'));
 }
 
+function resolveRuntime(spec, tc) {
+  const s = spec.runtime ?? {};
+  return {
+    nominal_mA:          tc.I_nominal_mA  ?? s.I_nominal_mA  ?? s.nominal_mA,
+    setpoint_mA:         tc.I_setpoint_mA ?? s.I_setpoint_mA ?? s.setpoint_mA,
+    required_duration_s: tc.t_duration_ms != null ? tc.t_duration_ms / 1000
+                       : s.t_duration_ms  != null ? s.t_duration_ms  / 1000
+                       : s.required_duration_s,
+  };
+}
+
 function runPipelineSpec(specFile) {
   const spec = loadSpec(specFile);
   const algo = JSON.parse(
@@ -20,7 +31,7 @@ function runPipelineSpec(specFile) {
   describe(spec.suite, () => {
     for (const tc of spec.cases) {
       it(tc.id, () => {
-        const rt = spec.runtime ?? {};
+        const rt = resolveRuntime(spec, tc);
         const logEntry = {
           default_current_mA: rt.nominal_mA,
           current_mA:         rt.setpoint_mA,

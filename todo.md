@@ -1,27 +1,28 @@
 Algorithm
 
-rampup: 
-- Auch wenn rampup erfolgreich beendet wurde (Marker Ramp) dann soll dennoch während der ersten Sekunde (Timeout) keine weitere Fehleraswertung erfolgen. Ein Einbruch des Strom soll toleriert werden, solane bei erreichen des Timeouts die 	RampUp -Beduingung nach wie vor erfüllt ist. 
-
-
-Steps: 
-
-
-
+Rampup: 
 
 Handler: 
 * Beide Handler (sowohl embedded c als auch webapp js sollen sample by sample arbeiten. so dass sie exakt das selbe verhalten erzeugen. 
 
+- bei Integral is es nie ein Fehler wenn nur 1 Wert ganz weit runter geht. KOmmt ein zweiter dazu, wird der erst ab dem zweiten Sample-Point als Warning/Fehler gewertet
 
+Bei integral-Berechnung ist noch ein Fehler: wenn ein Punkt unterhalt der Schwelle ist, dann wird der punkt zwar ignoriert, aber was wird dann nicht mit rein gerechnet, evtl kann man die Fläche anzeigen über dei das Integtal gebildet wird. Es müsste dann ja eine Art Stair Diagramm sein. 
+IDEE: Zwischen den Punkten linear-interpolieren, um so exakt den virtuellen Schnittpunkt mit der Threashold-level zu ermitteln. 
+
+
+IDEE; Das könnte man auch bei der Warnung/Fehler Duration messung machen. 
+
+UI: 
+- Burger-Menü einführen
+- Dark/Bright mode einführen
+- PDF Export 
+- Delete sample Punkt nur im Touch-Modus anzeigen
 
 
 Overlay: 
 
 * Horizontale Marker: 
-- A und B bitte mit Nominal und Setpoint konsistent beschriften
 - fail und warn marker anzeigen, auch auf welchem der oberen Werte sie beruhen, 
-  relative marker nur dann anzeigen wenn threshold_percent != 100 
-
-
-* bei den Visualisierungen anzeigen, aus welchem Grund die validierung fehl schlug (rampup, sustain, glitch, .... ) 
-
+- Integral-Schwellwerte anzeigen 
+- Wenn abbruch ohne Fertigstellung, dann ist der status false, trotzde, wird im hinteren Bereich des CHarts success und grünes Overlay angezeigt. 

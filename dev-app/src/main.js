@@ -39,7 +39,12 @@ for (const [path, mod] of Object.entries(curveModules)) {
   const name = id.split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   const raw  = mod.default ?? mod;
   const data = Array.isArray(raw) ? raw : (raw?.samples ?? []);
-  CURVES[id] = { name, data };
+  const meta = Array.isArray(raw) ? null : {
+    t_duration_ms: raw?.t_duration_ms ?? null,
+    I_setpoint_mA: raw?.I_setpoint_mA ?? null,
+    I_nominal_mA:  raw?.I_nominal_mA  ?? null,
+  };
+  CURVES[id] = { name, data, meta };
 }
 
 // ---- Algorithm registry ------------------------------------------------
@@ -138,6 +143,15 @@ for (const [id, { name }] of Object.entries(CURVES)) {
   elCurveSelect.appendChild(opt);
 }
 elCurveSelect.value = state.curveId;
+
+// ---- Apply curve metadata to profile inputs ----------------------------
+
+function applyMeta(meta) {
+  if (!meta) return;
+  if (meta.t_duration_ms != null) { state.profile.duration_s  = meta.t_duration_ms / 1000; elDuration.value = state.profile.duration_s;  }
+  if (meta.I_setpoint_mA != null) { state.profile.setpoint_mA = meta.I_setpoint_mA;         elSetpoint.value = meta.I_setpoint_mA;         }
+  if (meta.I_nominal_mA  != null) { state.profile.nominal_mA  = meta.I_nominal_mA;           elNominal.value  = meta.I_nominal_mA;          }
+}
 
 // ---- Build logEntry from profile + samples -----------------------------
 
@@ -352,6 +366,7 @@ function curvePoints(id) {
 function loadCurve(id) {
   sampleEditor.clearSelection();
   chart.data.datasets[0].data = curvePoints(id);
+  applyMeta(CURVES[id]?.meta);
   chart.update('none');
   reEvaluate();
 }
@@ -368,7 +383,13 @@ elBtnSaveCurve.addEventListener('click', () => {
   const id       = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, '');
   const filename = `${id || 'curve'}.json`;
   const points   = chart.data.datasets[0].data.map(p => ({ t_ms: Math.round(p.x * 1000), I_mA: p.y }));
-  const curveObj = { description: name, samples: points };
+  const curveObj = {
+    description:   name,
+    t_duration_ms: Math.round(state.profile.duration_s * 1000),
+    I_setpoint_mA: state.profile.setpoint_mA,
+    I_nominal_mA:  state.profile.nominal_mA,
+    samples: points
+  };
 
   // Download so the user can drop it into curves/
   const blob = new Blob([JSON.stringify(curveObj, null, 2)], { type: 'application/json' });
@@ -381,7 +402,11 @@ elBtnSaveCurve.addEventListener('click', () => {
 
   // Add to in-memory registry + dropdown for this session
   const effectiveId = id || 'curve';
-  CURVES[effectiveId] = { name, data: points };   // points are already {t_ms, I_mA}
+  CURVES[effectiveId] = {
+    name,
+    data: points,
+    meta: { t_duration_ms: curveObj.t_duration_ms, I_setpoint_mA: curveObj.I_setpoint_mA, I_nominal_mA: curveObj.I_nominal_mA }
+  };
   if (!elCurveSelect.querySelector(`option[value="${effectiveId}"]`)) {
     const opt       = document.createElement('option');
     opt.value       = effectiveId;
@@ -406,16 +431,23 @@ elBtnReset.addEventListener('click', () => {
 function samplesFromClipboardText(text) {
   try {
     const parsed = JSON.parse(text);
-    // {description, samples} wrapper (curve file format)
+    // {description, samples} wrapper (curve file format) or bare array
     const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.samples) ? parsed.samples : null);
     if (!arr || arr.length < 2) return null;
+    let samples;
     if (arr.every(p => typeof p.t_ms === 'number' && typeof p.I_mA === 'number')) {
-      return arr.map(p => ({ x: p.t_ms / 1000, y: p.I_mA }));
+      samples = arr.map(p => ({ x: p.t_ms / 1000, y: p.I_mA }));
+    } else if (arr.every(p => typeof p.x === 'number' && typeof p.y === 'number')) {
+      samples = arr;
+    } else {
+      return null;
     }
-    if (arr.every(p => typeof p.x === 'number' && typeof p.y === 'number')) {
-      return arr;
-    }
-    return null;
+    const meta = Array.isArray(parsed) ? null : {
+      t_duration_ms: parsed?.t_duration_ms ?? null,
+      I_setpoint_mA: parsed?.I_setpoint_mA ?? null,
+      I_nominal_mA:  parsed?.I_nominal_mA  ?? null,
+    };
+    return { samples, meta };
   } catch {
     return null;
   }
@@ -424,7 +456,10 @@ function samplesFromClipboardText(text) {
 elBtnCopy.addEventListener('click', () => {
   const samples = chart.data.datasets[0].data;
   const curveObj = {
-    description: CURVES[state.curveId]?.name ?? 'curve',
+    description:   CURVES[state.curveId]?.name ?? 'curve',
+    t_duration_ms: Math.round(state.profile.duration_s * 1000),
+    I_setpoint_mA: state.profile.setpoint_mA,
+    I_nominal_mA:  state.profile.nominal_mA,
     samples: samples.map(p => ({ t_ms: Math.round(p.x * 1000), I_mA: p.y }))
   };
   const text = JSON.stringify(curveObj, null, 2);
@@ -442,10 +477,11 @@ document.addEventListener('keydown', async (e) => {
   e.preventDefault();
   const text = await navigator.clipboard.readText().catch(() => null);
   if (!text) return;
-  const samples = samplesFromClipboardText(text);
-  if (!samples) return;
+  const parsed = samplesFromClipboardText(text);
+  if (!parsed) return;
+  applyMeta(parsed.meta);
   sampleEditor.clearSelection();
-  chart.data.datasets[0].data = samples;
+  chart.data.datasets[0].data = parsed.samples;
   chart.update('none');
   reEvaluate();
 });

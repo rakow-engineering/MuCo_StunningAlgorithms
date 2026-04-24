@@ -1,5 +1,8 @@
 {
   "description": "Standard ramp-up: rises to setpoint within 1 s, sustains above setpoint, then drops off at ~3.8 s.",
+  "t_duration_ms": 3000,
+  "I_setpoint_mA": 500,
+  "I_nominal_mA": 400,
   "samples": [
     { "t_ms": 0,    "I_mA": 0   },
     { "t_ms": 200,  "I_mA": 50  },
