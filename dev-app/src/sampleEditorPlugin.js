@@ -10,7 +10,7 @@
  *   Tap red × circle (NW of selected point) →  delete that sample
  *   Right-click on point               →  delete (desktop)
  *
- * onChanged(samples) after every edit; samples sorted by x.
+ * onChanged(samples) after every edit; samples sorted by time (x), then y for ties.
  * options.onSelectionChange(index | null) when the selected point changes.
  */
 
@@ -94,8 +94,15 @@ export function createSampleEditorPlugin(onChanged, options = {}) {
     return { x, y };
   }
 
-  function sortedCopy(data) {
-    return [...data].sort((a, b) => a.x - b.x);
+  /** Monotonic time order for the waveform; secondary key when x overlaps. */
+  function compareSampleOrder(a, b) {
+    const dx = a.x - b.x;
+    if (Math.abs(dx) > 1e-12) return dx;
+    return a.y - b.y;
+  }
+
+  function sortSamplesInPlace(data) {
+    data.sort(compareSampleOrder);
   }
 
   function selectedIndex() {
@@ -124,24 +131,17 @@ export function createSampleEditorPlugin(onChanged, options = {}) {
     return si;
   }
 
-  /** Geometry of the red × delete control for the current selection (or null). */
+  /** Geometry of the red × delete control — fixed at top-right chart border. */
   function deleteHandleGeom(chart) {
     const si = selectedIndex();
     if (si < 0 || !selectedRef) return null;
     const data = chart.data.datasets[0].data;
     if (si >= data.length) return null;
-    const xScale = chart.scales.x;
-    const yScale = chart.scales.y;
-    const px = xScale.getPixelForValue(data[si].x);
-    const py = yScale.getPixelForValue(data[si].y);
     const coarse = isCoarsePointer();
-    const r    = coarse ? DELETE_HANDLE_R_COARSE : DELETE_HANDLE_R_FINE;
-    const edge = coarse ? DELETE_HANDLE_EDGE_COARSE : DELETE_HANDLE_EDGE_FINE;
-    const { left, right, top, bottom } = chart.chartArea;
-    let cx = px - edge;
-    let cy = py - edge;
-    cx = Math.max(left + r + 1, Math.min(right - r - 1, cx));
-    cy = Math.max(top + r + 1, Math.min(bottom - r - 1, cy));
+    const r      = coarse ? DELETE_HANDLE_R_COARSE : DELETE_HANDLE_R_FINE;
+    const margin = r + 2;
+    const cx = chart.width - margin;
+    const cy = margin;
     const hitExtra = coarse ? 8 : 4;
     return { cx, cy, r, hitExtra };
   }
@@ -267,17 +267,20 @@ export function createSampleEditorPlugin(onChanged, options = {}) {
 
         if (activePointerId === null) return;
 
-        if (dragIdx !== null && dragIdx >= 0 && downPos) {
+        if (dragIdx !== null && dragIdx >= 0 && downPos && downPointRef) {
           const dx = Math.abs(pos.x - downPos.x);
           const dy = Math.abs(pos.y - downPos.y);
           if (dx > th || dy > th) isDragging = true;
           if (isDragging) {
             canvas.style.cursor = 'grabbing';
             const pt = dataFromPixel(chart, pos.x, pos.y);
-            data[dragIdx].x = pt.x;
-            data[dragIdx].y = pt.y;
+            downPointRef.x = pt.x;
+            downPointRef.y = pt.y;
+            sortSamplesInPlace(data);
+            dragIdx = data.indexOf(downPointRef);
+            if (dragIdx >= 0) hoverIdx = dragIdx;
             chart.update('none');
-            onChanged(sortedCopy(data));
+            onChanged([...data]);
           }
         }
       });
@@ -293,7 +296,8 @@ export function createSampleEditorPlugin(onChanged, options = {}) {
 
         if (hadDown) {
           if (isDragging && dragIdx !== null && dragIdx >= 0) {
-            data.sort((a, b) => a.x - b.x);
+            sortSamplesInPlace(data);
+            dragIdx = downPointRef ? data.indexOf(downPointRef) : dragIdx;
             if (downPointRef) selectedRef = downPointRef;
             chart.update('none');
             onChanged([...data]);
@@ -312,7 +316,7 @@ export function createSampleEditorPlugin(onChanged, options = {}) {
                 emitSelection();
                 const pt = dataFromPixel(chart, pos.x, pos.y);
                 data.push(pt);
-                data.sort((a, b) => a.x - b.x);
+                sortSamplesInPlace(data);
                 chart.update('none');
                 onChanged([...data]);
               }
@@ -338,7 +342,7 @@ export function createSampleEditorPlugin(onChanged, options = {}) {
       addListener(canvas, 'lostpointercapture', () => {
         if (!chartRef) return;
         if (isDragging && dragIdx !== null && dragIdx >= 0) {
-          chartRef.data.datasets[0].data.sort((a, b) => a.x - b.x);
+          sortSamplesInPlace(chartRef.data.datasets[0].data);
           chartRef.update('none');
           onChanged([...chartRef.data.datasets[0].data]);
         }

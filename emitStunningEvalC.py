@@ -147,8 +147,9 @@ def generate_config_c(spec):
     L.append(u'    },')
 
     L.append(u'    .completion = {')
-    L.append(u'        .use_duration               = {0},'.format(_bool(_step_enabled(duration))))
-    L.append(u'        .duration_threshold_percent = {0}u,'.format(int(duration.get('completion_threshold_percent', 100)) if duration else 100))
+    L.append(u'        .use_duration                       = {0},'.format(_bool(_step_enabled(duration))))
+    L.append(u'        .duration_threshold_percent         = {0}u,'.format(int(duration.get('completion_threshold_percent', 100)) if duration else 100))
+    L.append(u'        .duration_current_threshold_percent = {0}u,'.format(int(duration.get('current_threshold_percent', 100)) if duration else 100))
     L.append(u'        .use_integral               = {0},'.format(_bool(_step_enabled(integral))))
     L.append(u'        .integral = {')
     L.append(u'            .limit_to_nominal             = {0},'.format(_bool(limit_to_nominal)))

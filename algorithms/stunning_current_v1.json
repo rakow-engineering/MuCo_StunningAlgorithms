@@ -46,6 +46,7 @@
       "type": "completion",
       "enabled": true,
       "threshold": "nominal_mA",
+      "current_threshold_percent": 100,
       "duration_from": "required_duration_s",
       "completion_threshold_percent": 100
     },

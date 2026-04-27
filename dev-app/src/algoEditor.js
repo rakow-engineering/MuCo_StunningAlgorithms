@@ -34,15 +34,34 @@ const AFTER_OPTIONS = [
   { value: 'first_above_A', label: 'First above Nominal' },
 ];
 
-/** Canonical order for the completion tab. */
-const COMPLETION_OPS = ['min_duration_above', 'charge_integral', 'invalid_timeout', 'total_timeout'];
+/** Canonical op list per category — all ops are always shown, missing ones injected as disabled. */
+const CATEGORY_OPS = {
+  startup:    ['ramp_to_threshold'],
+  filter:     ['glitch_ignore'],
+  monitor:    ['sustain_thresholds'],
+  completion: ['min_duration_above', 'charge_integral', 'invalid_timeout', 'total_timeout'],
+};
 
-/** Default field values used when a completion step is absent from the spec. */
-const COMPLETION_DEFAULTS = {
+/** Default step objects used when a step op is absent from the spec. */
+const STEP_DEFAULTS = {
+  ramp_to_threshold: {
+    id: 'ramp', op: 'ramp_to_threshold', type: 'startup', enabled: true,
+    threshold: 'setpoint_mA', current_threshold_percent: 100,
+    timeout_ms: 1000, ramp_start_mA: 10, count_during_ramp: false,
+  },
+  glitch_ignore: {
+    id: 'glitch', op: 'glitch_ignore', type: 'filter', enabled: false,
+    ref: 'nominal_mA', max_gap_ms: 100,
+  },
+  sustain_thresholds: {
+    id: 'sustain', op: 'sustain_thresholds', type: 'monitor', enabled: false,
+    after: 'after_ramp', warn_below: 'setpoint_mA', warn_below_threshold_percent: 100,
+    fail_below: 'nominal_mA', fail_below_threshold_percent: 100,
+  },
   min_duration_above: {
     id: 'duration', op: 'min_duration_above', type: 'completion', enabled: false,
-    threshold: 'nominal_mA', duration_from: 'required_duration_s',
-    completion_threshold_percent: 100,
+    threshold: 'nominal_mA', current_threshold_percent: 100,
+    duration_from: 'required_duration_s', completion_threshold_percent: 100,
   },
   charge_integral: {
     id: 'charge_ok', op: 'charge_integral', type: 'completion', enabled: false,
@@ -59,6 +78,83 @@ const COMPLETION_DEFAULTS = {
     duration_from: 'required_duration_s', factor: 3.0,
   },
 };
+
+/**
+ * Default field values per op (only keys listed in stepFields). Used when opening
+ * a spec that omits properties the engine still understands — e.g. embedded V10
+ * `min_duration_above` without `current_threshold_percent`.
+ */
+const OP_STEP_DEFAULTS = {
+  ramp_to_threshold: {
+    threshold:                 'setpoint_mA',
+    current_threshold_percent: 100,
+    timeout_ms:                1000,
+    ramp_start_mA:             10,
+    count_during_ramp:         false,
+  },
+  glitch_ignore: {
+    ref:        'nominal_mA',
+    max_gap_ms: 100,
+  },
+  sustain_thresholds: {
+    after:                        'after_ramp',
+    warn_below:                   'setpoint_mA',
+    warn_below_threshold_percent: 100,
+    fail_below:                   'nominal_mA',
+    fail_below_threshold_percent: 100,
+  },
+  min_duration_above: {
+    threshold:                    'nominal_mA',
+    current_threshold_percent:  100,
+    duration_from:                'required_duration_s',
+    completion_threshold_percent: 100,
+  },
+  charge_integral: {
+    limit_to:                     'setpoint_mA',
+    current_threshold_percent:    70,
+    target: {
+      duration_from: 'required_duration_s',
+      current_from:  'setpoint_mA',
+    },
+    completion_threshold_percent: 100,
+  },
+  invalid_timeout: {
+    max_invalid_s: 0.5,
+  },
+  total_timeout: {
+    duration_from: 'required_duration_s',
+    factor:        3.0,
+  },
+};
+
+/** Fill missing keys so the editor always shows every schema field with sensible values. */
+function injectMissingStepFields(step) {
+  const tmpl = OP_STEP_DEFAULTS[step.op];
+  if (!tmpl) return;
+  for (const f of stepFields(step.op)) {
+    if (getDeep(step, f.key) !== undefined) continue;
+    const dv = getDeep(tmpl, f.key);
+    if (dv !== undefined) {
+      if (typeof dv === 'object' && dv !== null && !Array.isArray(dv)) {
+        setDeep(step, f.key, JSON.parse(JSON.stringify(dv)));
+      } else {
+        setDeep(step, f.key, dv);
+      }
+    } else if (f.type === 'binding' && f.options?.length) {
+      setDeep(step, f.key, f.options[0]);
+    } else if (f.type === 'int') {
+      setDeep(step, f.key, f.min ?? 0);
+    } else if (f.type === 'float') {
+      setDeep(step, f.key, 0);
+    } else if (f.type === 'select' && f.options?.length) {
+      setDeep(step, f.key, f.options[0].value);
+    } else if (f.type === 'bool') {
+      setDeep(step, f.key, false);
+    } else if (f.type === 'int_nullable') {
+      setDeep(step, f.key, null);
+    }
+  }
+}
 
 /** Field descriptors per op. */
 function stepFields(op) {
@@ -87,6 +183,7 @@ function stepFields(op) {
     case 'min_duration_above':
       return [
         { key: 'threshold',                    label: 'Threshold',              type: 'binding', options: CURRENT_BINDINGS },
+        { key: 'current_threshold_percent',    label: 'Current threshold (%)',  type: 'int',     min: 1, max: 100, unit: '%' },
         { key: 'duration_from',                label: 'Required duration',      type: 'binding', options: DURATION_BINDINGS },
         { key: 'completion_threshold_percent', label: 'Completion threshold (%)', type: 'int',   min: 1, max: 100, unit: '%' },
       ];
@@ -289,8 +386,7 @@ function renderField(step, field, onChange) {
 // ---------------------------------------------------------------------------
 
 function renderStep(step, onChange, canDisable = null) {
-  const fields    = stepFields(step.op);
-  const isStartup = step.type === 'startup';
+  const fields = stepFields(step.op);
 
   const opEl = document.createElement('span');
   opEl.className = 'ae-step-op';
@@ -302,30 +398,24 @@ function renderStep(step, onChange, canDisable = null) {
 
   const body = div('ae-step-body', ...fields.map(f => renderField(step, f, onChange)));
 
-  let head;
-  if (isStartup) {
-    head = div('ae-step-header', opEl, idEl);
-  } else {
-    const enabled = step.enabled !== false;
-    body.classList.toggle('ae-body-disabled', !enabled);
+  const enabled = step.enabled !== false;
+  body.classList.toggle('ae-body-disabled', !enabled);
 
-    const cb = document.createElement('input');
-    cb.type      = 'checkbox';
-    cb.className = 'ae-checkbox';
-    cb.checked   = enabled;
-    cb.addEventListener('change', () => {
-      if (!cb.checked && canDisable && !canDisable()) {
-        cb.checked = true;
-        return;
-      }
-      step.enabled = cb.checked;
-      body.classList.toggle('ae-body-disabled', !cb.checked);
-      onChange();
-    });
+  const cb = document.createElement('input');
+  cb.type      = 'checkbox';
+  cb.className = 'ae-checkbox';
+  cb.checked   = enabled;
+  cb.addEventListener('change', () => {
+    if (!cb.checked && canDisable && !canDisable()) {
+      cb.checked = true;
+      return;
+    }
+    step.enabled = cb.checked;
+    body.classList.toggle('ae-body-disabled', !cb.checked);
+    onChange();
+  });
 
-    head = div('ae-step-header', cb, opEl, idEl);
-  }
-
+  const head = div('ae-step-header', cb, opEl, idEl);
   return div('ae-step', head, body);
 }
 
@@ -427,13 +517,11 @@ export function createAlgoEditor(onChange) {
     content.innerHTML = '';
     if (!workingSpec) return;
 
-    let steps = (workingSpec.steps ?? []).filter(s => s.type === activeCategory);
+    const catOps  = CATEGORY_OPS[activeCategory] ?? [];
+    const opOrder = Object.fromEntries(catOps.map((op, i) => [op, i]));
 
-    if (activeCategory === 'completion') {
-      // Sort by canonical op order; all 4 are always present after open()
-      const opOrder = Object.fromEntries(COMPLETION_OPS.map((op, i) => [op, i]));
-      steps = steps.slice().sort((a, b) => (opOrder[a.op] ?? 99) - (opOrder[b.op] ?? 99));
-    }
+    let steps = (workingSpec.steps ?? []).filter(s => s.type === activeCategory);
+    steps = steps.slice().sort((a, b) => (opOrder[a.op] ?? 99) - (opOrder[b.op] ?? 99));
 
     if (steps.length === 0) {
       const msg = div('ae-empty');
@@ -469,11 +557,17 @@ export function createAlgoEditor(onChange) {
     workingSpec = JSON.parse(JSON.stringify(spec)); // deep clone
     if (!workingSpec.steps) workingSpec.steps = [];
 
-    // Inject any missing completion steps as disabled placeholders
-    for (const op of COMPLETION_OPS) {
-      if (!workingSpec.steps.some(s => s.op === op)) {
-        workingSpec.steps.push(JSON.parse(JSON.stringify(COMPLETION_DEFAULTS[op])));
+    // Inject any missing steps for every category as disabled placeholders
+    for (const ops of Object.values(CATEGORY_OPS)) {
+      for (const op of ops) {
+        if (!workingSpec.steps.some(s => s.op === op)) {
+          workingSpec.steps.push(JSON.parse(JSON.stringify(STEP_DEFAULTS[op])));
+        }
       }
+    }
+
+    for (const step of workingSpec.steps) {
+      injectMissingStepFields(step);
     }
 
     titleEl.textContent = spec.display_name ?? `Algorithm ${spec.algorithm_id}`;

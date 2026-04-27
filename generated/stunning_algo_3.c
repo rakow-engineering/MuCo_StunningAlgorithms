@@ -27,8 +27,9 @@ const StunningAlgoConfig_t STUNNING_ALGO_3 = {
         .fail_percent     = 0u,
     },
     .completion = {
-        .use_duration               = false,
-        .duration_threshold_percent = 100u,
+        .use_duration                       = false,
+        .duration_threshold_percent         = 100u,
+        .duration_current_threshold_percent = 100u,
         .use_integral               = true,
         .integral = {
             .limit_to_nominal             = false,

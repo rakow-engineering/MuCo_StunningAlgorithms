@@ -60,6 +60,73 @@
       }
     },
     {
+      "id": "current_threshold_80pct_passes",
+      "description": "current_threshold_percent=80 → effective threshold = 80% of 300 mA = 240 mA; current at 250 mA always above 240 mA → completes normally",
+      "step_override": { "current_threshold_percent": 80 },
+      "accumulate_start_ms": 0,
+      "samples": [
+        { "t_ms": 0,    "I_mA": 250 },
+        { "t_ms": 1000, "I_mA": 250 },
+        { "t_ms": 2000, "I_mA": 250 },
+        { "t_ms": 3000, "I_mA": 250 }
+      ],
+      "expect": {
+        "violations": [],
+        "completedAt_ms": 3000
+      }
+    },
+    {
+      "id": "current_threshold_80pct_below_nominal_no_completion",
+      "description": "current_threshold_percent=80 → effective threshold 240 mA; current at 250 mA above 240 mA but NOT 100% nominal — without scaling this would be below nominal and never complete",
+      "step_override": { "current_threshold_percent": 80 },
+      "accumulate_start_ms": 0,
+      "samples": [
+        { "t_ms": 0,    "I_mA": 250 },
+        { "t_ms": 1000, "I_mA": 250 },
+        { "t_ms": 2000, "I_mA": 250 },
+        { "t_ms": 3000, "I_mA": 250 }
+      ],
+      "expect": {
+        "violations": [],
+        "completedAt_ms": 3000
+      }
+    },
+    {
+      "id": "current_threshold_80pct_gap_below_effective",
+      "description": "current_threshold_percent=80 → effective threshold 240 mA; current dips to 230 mA (below 240 mA) → gap warning fires; completes late",
+      "step_override": { "current_threshold_percent": 80 },
+      "accumulate_start_ms": 0,
+      "samples": [
+        { "t_ms": 0,    "I_mA": 250 },
+        { "t_ms": 2000, "I_mA": 250 },
+        { "t_ms": 2010, "I_mA": 230 },
+        { "t_ms": 3010, "I_mA": 250 },
+        { "t_ms": 3020, "I_mA": 250 },
+        { "t_ms": 4020, "I_mA": 250 }
+      ],
+      "expect": {
+        "violations": [{ "severity": "warn", "messageKey": "below_threshold_gap" }],
+        "completedAt_ms": 4020
+      }
+    },
+    {
+      "id": "current_threshold_80pct_never_reached",
+      "description": "current_threshold_percent=80 → effective threshold 240 mA; current at 230 mA always below effective threshold → duration_not_reached",
+      "step_override": { "current_threshold_percent": 80 },
+      "accumulate_start_ms": 0,
+      "samples": [
+        { "t_ms": 0,    "I_mA": 230 },
+        { "t_ms": 1000, "I_mA": 230 },
+        { "t_ms": 5000, "I_mA": 230 }
+      ],
+      "expect": {
+        "violations": [
+          { "severity": "error", "messageKey": "duration_not_reached", "isSummary": true }
+        ],
+        "completedAt_ms": null
+      }
+    },
+    {
       "id": "never_reached",
       "description": "Only 1 s above nominal — duration_not_reached summary violation emitted",
       "accumulate_start_ms": 0,

@@ -68,8 +68,12 @@ export function normalizeMeasurements(logEntry) {
 
   if (Array.isArray(m)) {
     return m.map(pt => ({
-      t: pt.t_ms != null ? pt.t_ms / 1000 : parseFloat(pt.time_s ?? 0),
-      I: pt.I_mA  != null ? pt.I_mA        : parseFloat(pt.current_mA ?? 0)
+      t: pt.ms   != null ? pt.ms   / 1000
+       : pt.t_ms != null ? pt.t_ms / 1000
+       : parseFloat(pt.time_s ?? 0),
+      I: pt.mA   != null ? pt.mA
+       : pt.I_mA != null ? pt.I_mA
+       : parseFloat(pt.current_mA ?? 0)
     }));
   }
 
@@ -92,8 +96,11 @@ export function normalizeMeasurements(logEntry) {
  *   - If a dip is shorter than max_gap_ms: effectiveI = pre-dip hold value.
  *   - Otherwise: effectiveI = actual sample current.
  *
- * sustain_thresholds reads effectiveI for zone classification.
- * completion steps (duration, integral) always use raw sample.I.
+ * All downstream steps (sustain_thresholds, min_duration_above, charge_integral)
+ * read effectiveI so that forgiven dips are treated as if they never occurred.
+ * The evaluation loop also tracks runtimeCtx.prevEffectiveI (the previous sample's
+ * effective value) so completion steps can correctly handle the inter-sample interval
+ * around a glitch boundary.
  */
 function createGlitchIgnoreHandler(step, A, B) {
   const threshold = resolveThreshold(step.ref, A, B);
@@ -102,6 +109,7 @@ function createGlitchIgnoreHandler(step, A, B) {
   let glitchActive = false;
   let glitchStartT = null;
   let glitchHoldI  = 0;
+  const forgivenIntervals = [];
 
   return {
     update(sample, prevSample, runtimeCtx) {
@@ -114,12 +122,18 @@ function createGlitchIgnoreHandler(step, A, B) {
         const gap = sample.t - glitchStartT;
         runtimeCtx.effectiveI = gap < maxGapS ? glitchHoldI : sample.I;
       } else {
+        if (glitchActive) {
+          const gapDuration = sample.t - glitchStartT;
+          if (gapDuration < maxGapS) {
+            forgivenIntervals.push({ tStart_s: glitchStartT, tEnd_s: sample.t });
+          }
+        }
         glitchActive = false;
         glitchStartT = null;
         runtimeCtx.effectiveI = sample.I;
       }
     },
-    finalize() { return { violations: [], meta: {} }; }
+    finalize() { return { violations: [], meta: { glitchForgivenIntervals: forgivenIntervals } }; }
   };
 }
 
@@ -370,7 +384,9 @@ function createSustainHandler(step, A, B) {
  * Sets runtimeCtx.completedAt_s when goal is reached.
  */
 function createDurationHandler(step, A, B, bindings, logEntry) {
-  const threshold     = resolveThreshold(step.threshold, A, B);
+  const baseThreshold = resolveThreshold(step.threshold, A, B);
+  const currentPct    = step.current_threshold_percent ?? 100;
+  const threshold     = baseThreshold * currentPct / 100;
   const requiredField = step.duration_from;
   const requiredS     = logEntry[bindings[requiredField]] ?? logEntry.time_s ?? 0;
   const completionPct = (step.completion_threshold_percent ?? 100) / 100;
@@ -391,7 +407,10 @@ function createDurationHandler(step, A, B, bindings, logEntry) {
       if (completedAt_s !== null) return;
 
       const violationGuardStart = runtimeCtx.rampDeadline_s ?? 0;
-      const bothAbove = sample.I >= threshold && prevSample.I >= threshold;
+      // Use effective current so glitch-forgiven dips don't interrupt duration counting.
+      const curI  = runtimeCtx.effectiveI     ?? sample.I;
+      const prevI = runtimeCtx.prevEffectiveI ?? prevSample.I;
+      const bothAbove = curI >= threshold && prevI >= threshold;
 
       if (bothAbove) {
         const dtStart = Math.max(prevSample.t, accumulateStart);
@@ -413,7 +432,7 @@ function createDurationHandler(step, A, B, bindings, logEntry) {
           }
           gapStart = null;
         }
-      } else if (sample.I < threshold && completedAt_s === null) {
+      } else if (curI < threshold && completedAt_s === null) {
         if (gapStart === null && sample.t > violationGuardStart) {
           gapStart = Math.max(sample.t, violationGuardStart);
         }
@@ -460,7 +479,9 @@ function createDurationHandler(step, A, B, bindings, logEntry) {
           required_s:    requiredS,
           completedAt_s,
           durationSeries,
-          durationCompletionPct: Math.round(completionPct * 100),
+          durationCompletionPct:        Math.round(completionPct * 100),
+          durationCurrentThresholdPct:  currentPct,
+          durationBaseThreshold_mA:     baseThreshold,
           stunning_accumulate_start_s: accumulateStart
         }
       };
@@ -505,8 +526,9 @@ function createIntegralHandler(step, A, B, bindings, logEntry) {
       const violationGuardStart = runtimeCtx.rampDeadline_s ?? 0;
       const dtStart = Math.max(prevSample.t, accumulateStart);
       const dt  = sample.t - dtStart;
-      const I0  = prevSample.I;
-      const I1  = sample.I;
+      // Use effective current so glitch-forgiven dips don't break integral accumulation.
+      const I0  = runtimeCtx.prevEffectiveI ?? prevSample.I;
+      const I1  = runtimeCtx.effectiveI     ?? sample.I;
       const eff0 = I0 >= cutoff ? Math.min(I0, limitValue) : 0;
       const eff1 = I1 >= cutoff ? Math.min(I1, limitValue) : 0;
 
@@ -589,13 +611,19 @@ function createIntegralHandler(step, A, B, bindings, logEntry) {
 /**
  * invalid_timeout — summary error when total INVALID zone time exceeds limit.
  * Reads runtimeCtx.invalid_s accumulated by sustain_thresholds.
+ * Sets runtimeCtx.invalidTimedOut on first crossing so streaming callers can
+ * stop feeding samples immediately.
  */
 function createInvalidTimeoutHandler(step) {
+  const maxInvalidS = step.max_invalid_s ?? 0;
   return {
-    update() {},
+    update(_sample, _prev, runtimeCtx) {
+      if (!runtimeCtx.invalidTimedOut && (runtimeCtx.invalid_s ?? 0) > maxInvalidS) {
+        runtimeCtx.invalidTimedOut = true;
+      }
+    },
     finalize(_last, runtimeCtx) {
-      const maxInvalidS = step.max_invalid_s ?? 0;
-      const invalidS    = runtimeCtx?.invalid_s ?? 0;
+      const invalidS = runtimeCtx?.invalid_s ?? 0;
       if (invalidS > maxInvalidS) {
         return {
           violations: [{
@@ -619,22 +647,27 @@ function createInvalidTimeoutHandler(step) {
 /**
  * total_timeout — summary error when the recording duration exceeds
  * factor × required_duration_s.
+ * Sets runtimeCtx.totalTimedOut_s on first crossing so streaming callers can
+ * stop feeding samples immediately.
  */
 function createTotalTimeoutHandler(step, bindings, logEntry) {
   const factor        = step.factor ?? 3.0;
   const requiredField = step.duration_from ?? 'required_duration_s';
   const requiredS     = logEntry[bindings[requiredField]] ?? logEntry.time_s ?? 0;
+  const timeoutS      = factor * requiredS;
   let firstT = null;
 
   return {
-    update(sample) {
+    update(sample, _prev, runtimeCtx) {
       if (firstT === null) firstT = sample.t;
+      if (requiredS > 0 && !runtimeCtx.totalTimedOut_s && (sample.t - firstT) > timeoutS) {
+        runtimeCtx.totalTimedOut_s = sample.t;
+      }
     },
-    finalize(lastSample) {
+    finalize(lastSample, runtimeCtx) {
       if (firstT === null || lastSample == null) return { violations: [], meta: {} };
-      const totalS   = lastSample.t - firstT;
-      const timeoutS = factor * requiredS;
-      if (requiredS > 0 && totalS > timeoutS) {
+      if (runtimeCtx.totalTimedOut_s != null) {
+        const totalS = lastSample.t - firstT;
         return {
           violations: [{
             ruleId: step.id, severity: 'error',
@@ -686,88 +719,44 @@ function createHandler(step, A, B, bindings, logEntry) {
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// Step type processing order: filter must run before startup/monitor/completion
+// so that effectiveI is set before any step reads it.
 // ---------------------------------------------------------------------------
 
-/**
- * Evaluate a log entry against an algorithm spec.
- *
- * @param {Object} logEntry - A single log record (with measurements, current_mA, etc.)
- * @param {Object} spec     - Algorithm spec JSON (from the registry)
- * @returns {{ ok: boolean, violations: Array, meta: Object, thresholds: { A: number, B: number } }}
- */
+const STEP_TYPE_ORDER = { filter: 0, startup: 1, monitor: 2, completion: 3 };
+
 // ---------------------------------------------------------------------------
-// Named handler exports — one per step op, consistent with C prefix names
+// Shared initialisation helper
 // ---------------------------------------------------------------------------
-export {
-  createGlitchIgnoreHandler   as GlitchHandler,
-  createRampHandler           as RampHandler,
-  createSustainHandler        as SustainHandler,
-  createDurationHandler       as DurationHandler,
-  createIntegralHandler       as IntegralHandler,
-  createInvalidTimeoutHandler as InvalidTimeoutHandler,
-  createTotalTimeoutHandler   as TotalTimeoutHandler,
-};
 
-export function evaluate(logEntry, spec) {
-  if (!logEntry || !spec) {
-    return { ok: false, violations: [], meta: {}, thresholds: { A: 0, B: 0 } };
-  }
-
-  const bindings = spec.bindings || {};
-  const A = logEntry[bindings.nominal_mA]  ?? logEntry.default_current_mA ?? 0;
-  const B = logEntry[bindings.setpoint_mA] ?? logEntry.current_mA         ?? 0;
-
-  const points = normalizeMeasurements(logEntry);
-  if (points.length === 0) {
-    return { ok: false, violations: [], meta: { error: 'no_measurements' }, thresholds: { A, B } };
-  }
-
-  // Pre-scan: initialise timing defaults for algorithms without a ramp step,
-  // and flag the ramp step's presence so sustain_thresholds knows to wait.
-  const runtimeCtx = {};
+function _buildRuntimeCtx(spec) {
+  const ctx = {};
   let hasRampStep = false;
   for (const step of (spec.steps || [])) {
     if (step.op === 'ramp_to_threshold') { hasRampStep = true; break; }
   }
   if (!hasRampStep) {
-    // No ramp — monitoring and accumulation start from the first sample.
-    runtimeCtx.rampDeadline_s   = 0;
-    runtimeCtx.accumulateStart_s = 0;
+    ctx.rampDeadline_s    = 0;
+    ctx.accumulateStart_s = 0;
   } else {
-    runtimeCtx.hasRampStep = true;
+    ctx.hasRampStep = true;
   }
+  return ctx;
+}
 
-  // Create one handler per enabled step (startup steps always run; others respect enabled flag)
-  const handlers = (spec.steps || [])
-    .filter(step => step.enabled !== false)
-    .map(step => ({
-      step,
-      handler: createHandler(step, A, B, bindings, logEntry)
-    }));
+// ---------------------------------------------------------------------------
+// Shared finalisation — called by both evaluate() and createSession.finalize()
+// ---------------------------------------------------------------------------
 
-  // ---- Sample-by-sample processing ----------------------------------------
-  // Every sample is fed through all handlers in step order before the next
-  // sample is processed. Steps communicate via runtimeCtx (e.g. glitch sets
-  // effectiveI, ramp sets rampDeadline_s, duration/integral set completedAt_s).
-  let prevSample = null;
-  for (const sample of points) {
-    for (const { handler } of handlers) {
-      handler.update(sample, prevSample, runtimeCtx);
-    }
-    prevSample = sample;
-  }
-
-  // ---- Finalise: collect violations and meta ------------------------------
+function _finalizeHandlers(handlers, lastSample, runtimeCtx, spec, A, B) {
   const allViolations = [];
   const allMeta       = {};
 
   for (const { step, handler } of handlers) {
     const violationsBefore = allViolations.length;
-    const { violations, meta } = handler.finalize(prevSample, runtimeCtx);
+    const { violations, meta } = handler.finalize(lastSample, runtimeCtx);
     allViolations.push(...violations);
     Object.assign(allMeta, meta);
-
     if (step.type) {
       for (let i = violationsBefore; i < allViolations.length; i++) {
         allViolations[i] = { ...allViolations[i], stepType: step.type };
@@ -775,39 +764,36 @@ export function evaluate(logEntry, spec) {
     }
   }
 
-  // ---- Post-processing: truncate violations after completion ---------------
+  // Truncate non-summary violations that start after completion
   const completedAt = allMeta.completedAt_s;
   if (completedAt != null) {
     for (let i = allViolations.length - 1; i >= 0; i--) {
       const v = allViolations[i];
       if (v.isSummary) continue;
-      if (v.tStart_s >= completedAt) {
-        allViolations.splice(i, 1);
-      } else if (v.tEnd_s > completedAt) {
-        v.tEnd_s = completedAt;
-      }
+      if (v.tStart_s >= completedAt) allViolations.splice(i, 1);
+      else if (v.tEnd_s > completedAt) v.tEnd_s = completedAt;
     }
   }
 
-  // ---- Post-processing: suppress warn fully covered by an error -----------
-  const errorViolations = allViolations.filter(v => !v.isSummary && v.severity === 'error');
+  // Suppress warn violations fully covered by an error interval
+  const errorIntervals = allViolations.filter(v => !v.isSummary && v.severity === 'error');
   for (let i = allViolations.length - 1; i >= 0; i--) {
     const v = allViolations[i];
     if (v.isSummary || v.severity !== 'warn') continue;
-    const covered = errorViolations.some(e => e.tStart_s <= v.tStart_s && e.tEnd_s >= v.tEnd_s);
-    if (covered) allViolations.splice(i, 1);
+    if (errorIntervals.some(e => e.tStart_s <= v.tStart_s && e.tEnd_s >= v.tEnd_s)) {
+      allViolations.splice(i, 1);
+    }
   }
 
-  // ---- Overlay hints -------------------------------------------------------
+  // Overlay hints
   const overlayHints = {};
   if (allMeta.rampStart_s != null) {
-    overlayHints.rampStart_s      = allMeta.rampStart_s;
-    overlayHints.rampDeadline_s   = allMeta.rampDeadline_s;
-    overlayHints.rampReachedAt_s  = allMeta.rampReachedAt_s ?? null;
+    overlayHints.rampStart_s     = allMeta.rampStart_s;
+    overlayHints.rampDeadline_s  = allMeta.rampDeadline_s;
+    overlayHints.rampReachedAt_s = allMeta.rampReachedAt_s ?? null;
   }
-  if (allMeta.completedAt_s != null) {
-    overlayHints.completedAt_s = allMeta.completedAt_s;
-  }
+  if (allMeta.completedAt_s != null) overlayHints.completedAt_s = allMeta.completedAt_s;
+
   for (const step of (spec.steps || [])) {
     if (step.enabled === false) continue;
     if (step.op === 'sustain_thresholds') {
@@ -823,27 +809,139 @@ export function evaluate(logEntry, spec) {
       overlayHints.warnBelowPercent = warnPct;
     }
     if (step.op === 'min_duration_above') {
-      overlayHints.durationSeries        = allMeta.durationSeries ?? null;
-      overlayHints.durationThresholdPct  = allMeta.durationCompletionPct ?? 100;
+      const durBase    = resolveThreshold(step.threshold, A, B);
+      const durCurPct  = step.current_threshold_percent ?? 100;
+      overlayHints.durationSeries                = allMeta.durationSeries ?? null;
+      overlayHints.durationThresholdPct          = allMeta.durationCompletionPct ?? 100;
+      overlayHints.durationThresholdName         = step.threshold;
+      overlayHints.durationThreshold_mA          = durBase;
+      overlayHints.durationCurrentThresholdPct   = durCurPct;
+      overlayHints.durationEffectiveThreshold_mA = durBase * durCurPct / 100;
     }
     if (step.op === 'charge_integral') {
       const limitVal = resolveThreshold(step.limit_to ?? 'setpoint_mA', A, B);
       const cutPct   = step.current_threshold_percent ?? 70;
       overlayHints.integralCutoff_mA    = (cutPct / 100) * limitVal;
+      overlayHints.integralLimit_mA     = limitVal;
       overlayHints.integralSeries       = allMeta.integralSeries ?? null;
       overlayHints.integralThresholdPct = allMeta.integralCompletionPct ?? 100;
     }
   }
 
+  if (allMeta.glitchForgivenIntervals?.length) {
+    overlayHints.glitchForgivenIntervals = allMeta.glitchForgivenIntervals;
+  }
+
   const hasError = allViolations.some(v => v.severity === 'error');
   const hasWarn  = allViolations.some(v => v.severity === 'warn');
+  return { ok: !hasError, hasWarn, violations: allViolations, meta: allMeta, thresholds: { A, B }, overlayHints };
+}
+
+// ---------------------------------------------------------------------------
+// Named handler exports — one per step op, consistent with C prefix names
+// ---------------------------------------------------------------------------
+export {
+  createGlitchIgnoreHandler   as GlitchHandler,
+  createRampHandler           as RampHandler,
+  createSustainHandler        as SustainHandler,
+  createDurationHandler       as DurationHandler,
+  createIntegralHandler       as IntegralHandler,
+  createInvalidTimeoutHandler as InvalidTimeoutHandler,
+  createTotalTimeoutHandler   as TotalTimeoutHandler,
+};
+
+// ---------------------------------------------------------------------------
+// Public API — batch evaluation
+// ---------------------------------------------------------------------------
+
+/**
+ * Evaluate a complete log entry (all measurements at once) against a spec.
+ * @param {Object} logEntry - { measurements, default_current_mA, current_mA, time_s, … }
+ * @param {Object} spec     - Algorithm spec JSON
+ * @returns {{ ok, hasWarn, violations, meta, thresholds, overlayHints }}
+ */
+export function evaluate(logEntry, spec) {
+  if (!logEntry || !spec) {
+    return { ok: false, violations: [], meta: {}, thresholds: { A: 0, B: 0 } };
+  }
+
+  const bindings = spec.bindings || {};
+  const A = logEntry[bindings.nominal_mA]  ?? logEntry.default_current_mA ?? 0;
+  const B = logEntry[bindings.setpoint_mA] ?? logEntry.current_mA         ?? 0;
+
+  const points = normalizeMeasurements(logEntry);
+  if (points.length === 0) {
+    return { ok: false, violations: [], meta: { error: 'no_measurements' }, thresholds: { A, B } };
+  }
+
+  const runtimeCtx = _buildRuntimeCtx(spec);
+  const handlers   = (spec.steps || [])
+    .filter(step => step.enabled !== false)
+    .sort((a, b) => (STEP_TYPE_ORDER[a.type] ?? 99) - (STEP_TYPE_ORDER[b.type] ?? 99))
+    .map(step => ({ step, handler: createHandler(step, A, B, bindings, logEntry) }));
+
+  let prevSample = null;
+  for (const sample of points) {
+    for (const { handler } of handlers) handler.update(sample, prevSample, runtimeCtx);
+    runtimeCtx.prevEffectiveI = runtimeCtx.effectiveI;
+    prevSample = sample;
+  }
+
+  return _finalizeHandlers(handlers, prevSample, runtimeCtx, spec, A, B);
+}
+
+// ---------------------------------------------------------------------------
+// Public API — streaming / sample-by-sample evaluation
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a streaming evaluation session for sample-by-sample processing,
+ * mirroring the embedded C handler model.
+ *
+ * logEntryMeta carries the scalar context (thresholds, required duration) but
+ * no measurements — those are fed one at a time via update().
+ *
+ * Samples passed to update() must be { t, I } (t in seconds, I in mA).
+ * Convert from the { t_ms, I_mA } wire format with: { t: s.t_ms / 1000, I: s.I_mA }.
+ *
+ * Returns:
+ *   update(sample) → boolean  — true when the session has terminated early
+ *                               (completion achieved or a timeout fired).
+ *                               Stop feeding samples and call finalize().
+ *   finalize()     → result   — same shape as evaluate(); safe to call at any
+ *                               point, including after an early termination.
+ */
+export function createSession(spec, logEntryMeta) {
+  if (!spec || !logEntryMeta) return null;
+
+  const bindings = spec.bindings || {};
+  const A = logEntryMeta[bindings.nominal_mA]  ?? logEntryMeta.default_current_mA ?? 0;
+  const B = logEntryMeta[bindings.setpoint_mA] ?? logEntryMeta.current_mA         ?? 0;
+
+  const runtimeCtx = _buildRuntimeCtx(spec);
+  const handlers   = (spec.steps || [])
+    .filter(step => step.enabled !== false)
+    .sort((a, b) => (STEP_TYPE_ORDER[a.type] ?? 99) - (STEP_TYPE_ORDER[b.type] ?? 99))
+    .map(step => ({ step, handler: createHandler(step, A, B, bindings, logEntryMeta) }));
+
+  let prevSample = null;
+  let finished   = false;
 
   return {
-    ok: !hasError,
-    hasWarn,
-    violations:   allViolations,
-    meta:         allMeta,
-    thresholds:   { A, B },
-    overlayHints
+    update(sample) {
+      if (finished) return true;
+      for (const { handler } of handlers) handler.update(sample, prevSample, runtimeCtx);
+      runtimeCtx.prevEffectiveI = runtimeCtx.effectiveI;
+      prevSample = sample;
+      finished = runtimeCtx.completedAt_s    != null
+              || runtimeCtx.totalTimedOut_s  != null
+              || runtimeCtx.invalidTimedOut  === true;
+      return finished;
+    },
+
+    finalize() {
+      finished = true;
+      return _finalizeHandlers(handlers, prevSample, runtimeCtx, spec, A, B);
+    }
   };
 }

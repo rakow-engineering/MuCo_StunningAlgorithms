@@ -275,6 +275,23 @@ select option { background: var(--surface); }
 
 canvas { display: block; }
 
+/* Evaluation overlay: marker dwell tooltip (body-fixed, above chart) */
+.eval-overlay-marker-tooltip {
+  position: fixed;
+  z-index: 10000;
+  max-width: 340px;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-line;
+  color: #e8e8ec;
+  background: rgba(22, 33, 62, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  pointer-events: none;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+}
+
 /* Prevent the browser from scrolling/zooming the page while dragging samples */
 canvas.chart-sample-editor {
   touch-action: none;
@@ -299,7 +316,10 @@ canvas.chart-sample-editor {
   border: 1px solid var(--border);
   border-radius: 8px;
   width: 580px;
-  max-height: calc(100vh - 40px);
+  max-width: calc(100vw - 16px);
+  /* Definite height so the middle (.ae-content) can shrink and scroll; max-height alone often grows with content. */
+  height: min(88vh, calc(100vh - 32px));
+  max-height: calc(100vh - 32px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -366,8 +386,12 @@ canvas.chart-sample-editor {
 
 /* Scrollable content */
 .ae-content {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;        /* allow flex item to shrink so overflow-y:auto actually scrolls */
+  overflow-x: hidden;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
@@ -385,6 +409,7 @@ canvas.chart-sample-editor {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+  flex-shrink: 0;
 }
 .ae-step-header {
   display: flex;

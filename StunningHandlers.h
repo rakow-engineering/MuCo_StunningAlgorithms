@@ -125,7 +125,8 @@ void StunningDuration_update(
     float                       prev_I,
     float                       nominal_mA,
     float                       required_duration_s,
-    uint8_t                     threshold_percent,   /**< cfg->completion.duration_threshold_percent */
+    uint8_t                     duration_threshold_percent,   /**< cfg->completion.duration_threshold_percent         */
+    uint8_t                     current_threshold_percent,    /**< cfg->completion.duration_current_threshold_percent */
     StunningRuntimeCtx_t       *ctx);
 
 /* =========================================================================

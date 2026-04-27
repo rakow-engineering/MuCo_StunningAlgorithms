@@ -118,6 +118,7 @@ STUNNING_RESULT_t StunningAlgo_update(
             nominal_mA,
             required_duration_s,
             cfg->completion.duration_threshold_percent,
+            cfg->completion.duration_current_threshold_percent,
             &state->ctx);
     }
 

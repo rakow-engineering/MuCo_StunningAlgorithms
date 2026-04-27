@@ -1,18 +1,21 @@
 {
+  "version": "1.0",
   "description": "Ramp-up with abrupt drop at 3.8 s — tests glitch-ignore and sustain violation detection.",
-  "t_duration_ms": 3000,
-  "I_setpoint_mA": 500,
-  "I_nominal_mA": 400,
+  "profile": {
+    "duration_ms": 3000,
+    "setpoint_mA": 500,
+    "nominal_mA":  400
+  },
   "samples": [
-    { "t_ms": 0,    "I_mA": 0   },
-    { "t_ms": 200,  "I_mA": 50  },
-    { "t_ms": 500,  "I_mA": 250 },
-    { "t_ms": 800,  "I_mA": 460 },
-    { "t_ms": 1000, "I_mA": 505 },
-    { "t_ms": 1500, "I_mA": 512 },
-    { "t_ms": 2000, "I_mA": 498 },
-    { "t_ms": 2500, "I_mA": 508 },
-    { "t_ms": 3200, "I_mA": 502 },
-    { "t_ms": 3800, "I_mA": 20  }
+    { "ms": 0,    "mA": 0   },
+    { "ms": 200,  "mA": 50  },
+    { "ms": 500,  "mA": 250 },
+    { "ms": 800,  "mA": 460 },
+    { "ms": 1000, "mA": 505 },
+    { "ms": 1500, "mA": 512 },
+    { "ms": 2000, "mA": 498 },
+    { "ms": 2500, "mA": 508 },
+    { "ms": 3200, "mA": 502 },
+    { "ms": 3800, "mA": 20  }
   ]
 }

@@ -209,10 +209,12 @@ void StunningDuration_update(
     float                       prev_I,
     float                       nominal_mA,
     float                       required_duration_s,
-    uint8_t                     threshold_percent,
+    uint8_t                     duration_threshold_percent,
+    uint8_t                     current_threshold_percent,
     StunningRuntimeCtx_t       *ctx)
 {
-    uint32_t acc_start = ctx->accumulateStart_ms;
+    float    current_thr = nominal_mA * ((float)current_threshold_percent / 100.0f);
+    uint32_t acc_start   = ctx->accumulateStart_ms;
     uint32_t acc_dt;
     uint32_t required_ms;
 
@@ -221,12 +223,12 @@ void StunningDuration_update(
 
     acc_dt = (prev_ms < acc_start) ? (t_ms - acc_start) : (t_ms - prev_ms);
 
-    if (I_mA >= nominal_mA && prev_I >= nominal_mA) {
+    if (I_mA >= current_thr && prev_I >= current_thr) {
         s->elapsed_ms += acc_dt;
     }
 
     required_ms = (uint32_t)(required_duration_s
-                  * ((float)threshold_percent / 100.0f) * 1000.0f);
+                  * ((float)duration_threshold_percent / 100.0f) * 1000.0f);
 
     if (s->elapsed_ms >= required_ms) {
         s->goal_reached     = true;

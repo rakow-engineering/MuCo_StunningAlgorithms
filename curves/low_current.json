@@ -1,0 +1,22 @@
+{
+  "version": "1.0",
+  "description": "Low-current scenario: smaller animal, setpoint 250 mA, 2 s duration.",
+  "profile": 
+  {
+    "duration_ms": 2000,
+    "setpoint_mA": 250,
+    "nominal_mA": 200
+  },
+  
+  "samples": [
+    { "ms": 0,    "mA": 0   },
+    { "ms": 150,  "mA": 30  },
+    { "ms": 400,  "mA": 120 },
+    { "ms": 700,  "mA": 230 },
+    { "ms": 900,  "mA": 255 },
+    { "ms": 1200, "mA": 258 },
+    { "ms": 1600, "mA": 252 },
+    { "ms": 2000, "mA": 248 },
+    { "ms": 2500, "mA": 10  }
+  ]
+}

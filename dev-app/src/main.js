@@ -39,11 +39,7 @@ for (const [path, mod] of Object.entries(curveModules)) {
   const name = id.split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   const raw  = mod.default ?? mod;
   const data = Array.isArray(raw) ? raw : (raw?.samples ?? []);
-  const meta = Array.isArray(raw) ? null : {
-    t_duration_ms: raw?.t_duration_ms ?? null,
-    I_setpoint_mA: raw?.I_setpoint_mA ?? null,
-    I_nominal_mA:  raw?.I_nominal_mA  ?? null,
-  };
+  const meta = Array.isArray(raw) ? null : (raw?.profile ?? null);
   CURVES[id] = { name, data, meta };
 }
 
@@ -97,7 +93,8 @@ const elAlgo       = document.getElementById('algo-select');
 const elBadge      = document.getElementById('result-badge');
 const elZoneTimes  = document.getElementById('zone-times');
 const elViolations = document.getElementById('violations');
-const elShowProgress = document.getElementById('show-progress');
+const elShowProgress    = document.getElementById('show-progress');
+const elShowStateColors = document.getElementById('show-state-colors');
 const elCurveSelect  = document.getElementById('curve-select');
 const elBtnReset     = document.getElementById('btn-reset');
 const elBtnSaveCurve = document.getElementById('btn-save-curve');
@@ -146,11 +143,11 @@ elCurveSelect.value = state.curveId;
 
 // ---- Apply curve metadata to profile inputs ----------------------------
 
-function applyMeta(meta) {
-  if (!meta) return;
-  if (meta.t_duration_ms != null) { state.profile.duration_s  = meta.t_duration_ms / 1000; elDuration.value = state.profile.duration_s;  }
-  if (meta.I_setpoint_mA != null) { state.profile.setpoint_mA = meta.I_setpoint_mA;         elSetpoint.value = meta.I_setpoint_mA;         }
-  if (meta.I_nominal_mA  != null) { state.profile.nominal_mA  = meta.I_nominal_mA;           elNominal.value  = meta.I_nominal_mA;          }
+function applyMeta(profile) {
+  if (!profile) return;
+  if (profile.duration_ms != null) { state.profile.duration_s  = profile.duration_ms / 1000; elDuration.value = state.profile.duration_s;  }
+  if (profile.setpoint_mA != null) { state.profile.setpoint_mA = profile.setpoint_mA;         elSetpoint.value = profile.setpoint_mA;         }
+  if (profile.nominal_mA  != null) { state.profile.nominal_mA  = profile.nominal_mA;           elNominal.value  = profile.nominal_mA;          }
 }
 
 // ---- Build logEntry from profile + samples -----------------------------
@@ -160,7 +157,7 @@ function buildLogEntry(samples) {
     default_current_mA: state.profile.nominal_mA,
     current_mA:         state.profile.setpoint_mA,
     time_s:             state.profile.duration_s,
-    measurements: samples.map(pt => ({ t_ms: Math.round(pt.x * 1000), I_mA: pt.y }))
+    measurements: samples.map(pt => ({ ms: Math.round(pt.x * 1000), mA: pt.y }))
   };
 }
 
@@ -175,16 +172,61 @@ function updateAxisBounds() {
   chart.options.scales.y.max = Math.round(state.profile.setpoint_mA * 1.3);
 }
 
+// ---- State colors: per-point background based on phase/threshold --------
+
+function computePointColors(samples, result) {
+  const hints = result.overlayHints || {};
+  const rampEnd = hints.rampReachedAt_s ?? hints.rampDeadline_s ?? null;
+
+  // Color by violation intervals so glitch-forgiven samples aren't marked as bad.
+  const nonSummary = (result.violations || []).filter(v => !v.isSummary);
+  const errorVios  = nonSummary.filter(v => v.severity === 'error');
+  const warnVios   = nonSummary.filter(v => v.severity === 'warn');
+  const forgiven   = hints.glitchForgivenIntervals || [];
+
+  return samples.map((pt) => {
+    const t = pt.x;
+
+    // Blue: sample that triggered ramp detection
+    if (hints.rampStart_s != null && Math.abs(t - hints.rampStart_s) < 0.001)
+      return 'rgba(33, 150, 243, 0.9)';
+
+    // Blue: first sample to cross target current (ramp success)
+    if (hints.rampReachedAt_s != null && Math.abs(t - hints.rampReachedAt_s) < 0.001)
+      return 'rgba(33, 150, 243, 0.9)';
+
+    // Gray: after stunning goal reached
+    if (hints.completedAt_s != null && t >= hints.completedAt_s)
+      return 'rgba(160, 160, 160, 0.75)';
+
+    // Gray: before/during ramp — no sustain step watching these
+    if (rampEnd != null && t <= rampEnd)
+      return 'rgba(160, 160, 160, 0.75)';
+
+    // Cyan: glitch-forgiven dip samples (checked before violation coloring)
+    if (forgiven.some(iv => t >= iv.tStart_s && t <= iv.tEnd_s))
+      return 'rgba(0, 188, 212, 0.85)';
+
+    // Color matches what the evaluation engine actually flagged (respects glitch filter).
+    if (errorVios.some(v => t >= v.tStart_s && t <= v.tEnd_s)) return 'rgba(220, 53, 69, 0.9)';
+    if (warnVios.some(v  => t >= v.tStart_s && t <= v.tEnd_s)) return 'rgba(255, 193, 7, 0.9)';
+    return 'rgba(76, 175, 80, 0.9)';
+  });
+}
+
 // ---- Re-evaluate and update UI -----------------------------------------
 
 function reEvaluate() {
   const spec    = getCurrentSpec();
   const samples = chart.data.datasets[0].data;
+  const ds      = chart.data.datasets[0];
 
   updateAxisBounds();
 
   if (!spec || samples.length < 2) {
     evaluationOverlayPlugin.setEvaluationData('dev-chart', null);
+    ds.pointBackgroundColor = undefined;
+    ds.pointBorderColor     = undefined;
     chart.update();
     renderResults(null);
     return;
@@ -195,6 +237,16 @@ function reEvaluate() {
     result.overlayHints.durationSeries = null;
     result.overlayHints.integralSeries = null;
   }
+
+  if (elShowStateColors.checked) {
+    const colors = computePointColors(samples, result);
+    ds.pointBackgroundColor = colors;
+    ds.pointBorderColor     = colors;
+  } else {
+    ds.pointBackgroundColor = undefined;
+    ds.pointBorderColor     = undefined;
+  }
+
   evaluationOverlayPlugin.setEvaluationData('dev-chart', result);
   chart.update();
   renderResults(result);
@@ -248,7 +300,7 @@ function updateChartHintText() {
   if (!elChartHint) return;
   const coarse = window.matchMedia('(pointer: coarse)').matches;
   elChartHint.textContent = coarse
-    ? 'Tap empty chart: add · Tap point: select · Drag to move · Tap red × (above-left of point) to delete'
+    ? 'Tap empty chart: add · Tap point: select · Drag to move · Tap red × (top-right of chart) to delete'
     : 'Click empty: add · Drag point: move · Select a point, then tap the red × or right-click to delete';
 }
 
@@ -318,6 +370,17 @@ const chart = new Chart(canvas, {
 // The chart-wrap container drives the size through CSS flex layout.
 window.addEventListener('resize', () => chart.resize());
 
+// Drop sample selection when the pointer goes down outside the chart canvas (sidebar, hint, etc.).
+document.addEventListener(
+  'pointerdown',
+  (e) => {
+    const t = e.target;
+    if (t === canvas || (t instanceof Node && canvas.contains(t))) return;
+    sampleEditor.clearSelection();
+  },
+  true
+);
+
 // ---- Algorithm editor --------------------------------------------------
 // specOverrides holds user-edited copies of algorithm specs, keyed by algoId.
 // reEvaluate() prefers the override when present.
@@ -354,19 +417,24 @@ elAlgo.addEventListener('change', () => {
 });
 
 elShowProgress.addEventListener('change', reEvaluate);
+elShowStateColors.addEventListener('change', reEvaluate);
 
 // ---- Curve helpers -----------------------------------------------------
 
 function curvePoints(id) {
   const curve = CURVES[id];
   const data  = curve?.data ?? buildDefaultSamples(state.profile.setpoint_mA);
-  return data.map(p => p.t_ms != null ? { x: p.t_ms / 1000, y: p.I_mA } : { x: p.x, y: p.y });
+  return data.map(p =>
+    p.ms   != null ? { x: p.ms   / 1000, y: p.mA   } :
+    p.t_ms != null ? { x: p.t_ms / 1000, y: p.I_mA } :
+                     { x: p.x,           y: p.y     }
+  );
 }
 
 function loadCurve(id) {
   sampleEditor.clearSelection();
-  chart.data.datasets[0].data = curvePoints(id);
   applyMeta(CURVES[id]?.meta);
+  chart.data.datasets[0].data = curvePoints(id);
   chart.update('none');
   reEvaluate();
 }
@@ -382,14 +450,9 @@ elBtnSaveCurve.addEventListener('click', () => {
   const name     = raw.trim();
   const id       = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, '');
   const filename = `${id || 'curve'}.json`;
-  const points   = chart.data.datasets[0].data.map(p => ({ t_ms: Math.round(p.x * 1000), I_mA: p.y }));
-  const curveObj = {
-    description:   name,
-    t_duration_ms: Math.round(state.profile.duration_s * 1000),
-    I_setpoint_mA: state.profile.setpoint_mA,
-    I_nominal_mA:  state.profile.nominal_mA,
-    samples: points
-  };
+  const points  = chart.data.datasets[0].data.map(p => ({ ms: Math.round(p.x * 1000), mA: p.y }));
+  const profile = { duration_ms: Math.round(state.profile.duration_s * 1000), setpoint_mA: state.profile.setpoint_mA, nominal_mA: state.profile.nominal_mA };
+  const curveObj = { version: '1.0', description: name, profile, samples: points };
 
   // Download so the user can drop it into curves/
   const blob = new Blob([JSON.stringify(curveObj, null, 2)], { type: 'application/json' });
@@ -402,11 +465,7 @@ elBtnSaveCurve.addEventListener('click', () => {
 
   // Add to in-memory registry + dropdown for this session
   const effectiveId = id || 'curve';
-  CURVES[effectiveId] = {
-    name,
-    data: points,
-    meta: { t_duration_ms: curveObj.t_duration_ms, I_setpoint_mA: curveObj.I_setpoint_mA, I_nominal_mA: curveObj.I_nominal_mA }
-  };
+  CURVES[effectiveId] = { name, data: points, meta: profile };
   if (!elCurveSelect.querySelector(`option[value="${effectiveId}"]`)) {
     const opt       = document.createElement('option');
     opt.value       = effectiveId;
@@ -435,18 +494,16 @@ function samplesFromClipboardText(text) {
     const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.samples) ? parsed.samples : null);
     if (!arr || arr.length < 2) return null;
     let samples;
-    if (arr.every(p => typeof p.t_ms === 'number' && typeof p.I_mA === 'number')) {
+    if (arr.every(p => typeof p.ms === 'number' && typeof p.mA === 'number')) {
+      samples = arr.map(p => ({ x: p.ms / 1000, y: p.mA }));
+    } else if (arr.every(p => typeof p.t_ms === 'number' && typeof p.I_mA === 'number')) {
       samples = arr.map(p => ({ x: p.t_ms / 1000, y: p.I_mA }));
     } else if (arr.every(p => typeof p.x === 'number' && typeof p.y === 'number')) {
       samples = arr;
     } else {
       return null;
     }
-    const meta = Array.isArray(parsed) ? null : {
-      t_duration_ms: parsed?.t_duration_ms ?? null,
-      I_setpoint_mA: parsed?.I_setpoint_mA ?? null,
-      I_nominal_mA:  parsed?.I_nominal_mA  ?? null,
-    };
+    const meta = Array.isArray(parsed) ? null : (parsed?.profile ?? null);
     return { samples, meta };
   } catch {
     return null;
@@ -456,11 +513,10 @@ function samplesFromClipboardText(text) {
 elBtnCopy.addEventListener('click', () => {
   const samples = chart.data.datasets[0].data;
   const curveObj = {
-    description:   CURVES[state.curveId]?.name ?? 'curve',
-    t_duration_ms: Math.round(state.profile.duration_s * 1000),
-    I_setpoint_mA: state.profile.setpoint_mA,
-    I_nominal_mA:  state.profile.nominal_mA,
-    samples: samples.map(p => ({ t_ms: Math.round(p.x * 1000), I_mA: p.y }))
+    version:     '1.0',
+    description: CURVES[state.curveId]?.name ?? 'curve',
+    profile: { duration_ms: Math.round(state.profile.duration_s * 1000), setpoint_mA: state.profile.setpoint_mA, nominal_mA: state.profile.nominal_mA },
+    samples: samples.map(p => ({ ms: Math.round(p.x * 1000), mA: p.y }))
   };
   const text = JSON.stringify(curveObj, null, 2);
   navigator.clipboard.writeText(text).then(() => {
