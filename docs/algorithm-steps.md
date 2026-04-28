@@ -48,6 +48,7 @@ Steps that reference a current level use one of these symbolic names:
 | `setpoint_mA`            | Threshold B (target current)       |
 | `min_nominal_setpoint`   | `min(nominal_mA, setpoint_mA)`     |
 
+TODO --> `min(nominal_mA, setpoint_mA)` hast to be removed, setpoint must never be below nominal, so the min value is always nominal if this if this info is needed!!1
 An integer can also be used directly (fixed mA value, rarely needed).
 
 ---
@@ -71,20 +72,21 @@ Steps with `"enabled": false` are ignored completely.
 
 ---
 
-### `glitch_ignore` — violation duration filter
+### `glitch_ignore` 
 
 **Category:** `filter`
 
-Removes any non-summary violation (warn or error, from any step) whose
-time span is shorter than `max_gap_ms`. Acts as a post-processing filter on
-the collected violation list; does not modify the raw measurement signal.
+TODO: This filter works on sample-level, not on evaluation result processing level
+if a value is below the setpoint, and the next sample is above within the  max_gap_ms time, the value is regared as if it was not under the setpoint. 
 
-Because the filter is time-based only, a dip that is brief enough gets forgiven
-regardless of how deep it went — a 5 ms drop to 0 mA is treated the same as a
-5 ms drop to just below the warn threshold.
+So the glitch filter thread short undercuts if the are short enough as if the not were present. 
+the level where it is regarded as undercut ist the setpoint level.
 
-Forgiven intervals are reported separately in the overlay hints and shown as
-cyan bands on the chart.
+If we receive values every 100ms, and the max_gap is also 100ms, how should this work. 
+If a value is below setpoint, its timestamp is taken. 
+If the next value is above the setpoint, with a timestamp diff <= max_gab, the first value is handled (end internally forwarded, as if it was on level of the setpoint. 
+
+This can be viualized with a no-filled grad dot in the chart-overly.
 
 #### Parameters
 
@@ -104,15 +106,9 @@ cyan bands on the chart.
 }
 ```
 
-#### Effect on result
+#### Effect on values for other algorithm-steps: 
 
-- Violations shorter than `max_gap_ms` are dropped from the violation list.
-- If violations were dropped, `overlayHints.glitchForgivenIntervals` contains
-  the suppressed intervals for visualization.
-- Does **not** affect duration or integral accumulation — those still count raw
-  sample values.
-
----
+- Setpoint violations shorter than `max_gap_ms` are handled as if the were = setpoint 
 
 ### `ramp_to_threshold` — startup current ramp check
 
