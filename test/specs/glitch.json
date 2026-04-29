@@ -1,13 +1,12 @@
 {
   "suite": "glitch",
-  "description": "GlitchHandler: sub-nominal dips shorter than max_gap_ms are forgiven",
-  "handler": "GlitchHandler",
-  "step": { "op": "glitch_ignore", "ref": "nominal_mA", "max_gap_ms": 100 },
+  "description": "GlitchHandler batch mode: violation runs shorter than max_gap_ms are fully forgiven (all-or-nothing via preprocess). Monitor handlers are wired so the handler knows what counts as a violation. effectiveI for forgiven samples is raised to max(handler thresholds) = setpoint_mA.",
+  "step": { "op": "glitch_ignore", "max_gap_ms": 100 },
   "runtime_defaults": { "nominal_mA": 300, "setpoint_mA": 350 },
   "cases": [
     {
       "id": "no_dip",
-      "description": "Current always above nominal — effectiveI = actual I throughout",
+      "description": "Current always above setpoint — all samples pass, no forgiving needed",
       "samples": [
         { "t_ms": 0,   "I_mA": 400 },
         { "t_ms": 50,  "I_mA": 420 },
@@ -23,7 +22,7 @@
     },
     {
       "id": "short_dip_forgiven",
-      "description": "50 ms dip below nominal (< 100 ms limit) — effectiveI = pre-dip hold",
+      "description": "Dip at 110–155 ms (45 ms run, < 100 ms limit). preprocess marks it forgiven. effectiveI is raised to max(threshold) = setpoint_mA = 350 for all dip samples.",
       "samples": [
         { "t_ms": 0,   "I_mA": 400 },
         { "t_ms": 100, "I_mA": 400 },
@@ -34,16 +33,16 @@
       ],
       "expect": {
         "per_sample": [
-          { "t_ms": 110, "effectiveI": 400 },
-          { "t_ms": 140, "effectiveI": 400 },
-          { "t_ms": 155, "effectiveI": 400 },
+          { "t_ms": 110, "effectiveI": 350 },
+          { "t_ms": 140, "effectiveI": 350 },
+          { "t_ms": 155, "effectiveI": 350 },
           { "t_ms": 200, "effectiveI": 400 }
         ]
       }
     },
     {
       "id": "long_dip_committed",
-      "description": "Dip first drops at t=110ms; at t=220ms gap=110ms > 100ms limit → committed → effectiveI = actual I",
+      "description": "Dip starts at t=110ms; recovery at t=300ms → run = 190ms > 100ms. preprocess does NOT forgive it. effectiveI = actual I throughout.",
       "samples": [
         { "t_ms": 0,   "I_mA": 400 },
         { "t_ms": 100, "I_mA": 400 },
@@ -53,6 +52,7 @@
       ],
       "expect": {
         "per_sample": [
+          { "t_ms": 110, "effectiveI": 50 },
           { "t_ms": 220, "effectiveI": 50 },
           { "t_ms": 300, "effectiveI": 400 }
         ]
@@ -60,16 +60,17 @@
     },
     {
       "id": "still_forgiven_at_99ms",
-      "description": "At t=209ms gap=99ms < 100ms — still forgiven, effectiveI = hold value",
+      "description": "Dip at 110ms, first clean sample at t=209ms → run duration = 99ms < 100ms limit. preprocess forgives. effectiveI = setpoint_mA = 350 for the dip sample; recovery sample is clean (effectiveI = actual I).",
       "samples": [
         { "t_ms": 0,   "I_mA": 400 },
         { "t_ms": 100, "I_mA": 400 },
         { "t_ms": 110, "I_mA": 50  },
-        { "t_ms": 209, "I_mA": 50  },
+        { "t_ms": 209, "I_mA": 400 },
         { "t_ms": 300, "I_mA": 400 }
       ],
       "expect": {
         "per_sample": [
+          { "t_ms": 110, "effectiveI": 350 },
           { "t_ms": 209, "effectiveI": 400 },
           { "t_ms": 300, "effectiveI": 400 }
         ]

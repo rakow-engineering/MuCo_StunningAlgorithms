@@ -16,6 +16,11 @@ import { evaluate }               from '@algo/StunningEvaluationEngine.js';
 import evaluationOverlayPlugin    from '@algo/EvaluationOverlayPlugin.js';
 import { createSampleEditorPlugin } from './sampleEditorPlugin.js';
 import { createAlgoEditor }         from './algoEditor.js';
+import { computePointColors }       from './computePointColors.js';
+import { createBurgerMenu }         from './burgerMenu.js';
+import { initTheme, toggleTheme, getIsDark } from './theme.js';
+
+initTheme();
 
 import spec1 from '@algo/algorithms/stunning_embedded_v10.json';
 import spec2 from '@algo/algorithms/stunning_current_v1.json';
@@ -95,11 +100,6 @@ const elZoneTimes  = document.getElementById('zone-times');
 const elViolations = document.getElementById('violations');
 const elShowProgress    = document.getElementById('show-progress');
 const elShowStateColors = document.getElementById('show-state-colors');
-const elCurveSelect  = document.getElementById('curve-select');
-const elBtnReset     = document.getElementById('btn-reset');
-const elBtnSaveCurve = document.getElementById('btn-save-curve');
-const elBtnCopy      = document.getElementById('btn-copy');
-const elBtnClear     = document.getElementById('btn-clear');
 const elBtnEditAlgo  = document.getElementById('btn-edit-algo');
 const elChartHint    = document.getElementById('chart-hint');
 const canvas         = document.getElementById('dev-chart');
@@ -131,16 +131,6 @@ for (const spec of Object.values(SPECS)) {
 }
 elAlgo.value = String(state.algoId);
 
-// ---- Populate curve dropdown -------------------------------------------
-
-for (const [id, { name }] of Object.entries(CURVES)) {
-  const opt = document.createElement('option');
-  opt.value       = id;
-  opt.textContent = name;
-  elCurveSelect.appendChild(opt);
-}
-elCurveSelect.value = state.curveId;
-
 // ---- Apply curve metadata to profile inputs ----------------------------
 
 function applyMeta(profile) {
@@ -170,48 +160,6 @@ function updateAxisBounds() {
   const maxPtX = data.length > 0 ? Math.max(...data.map(p => p.x)) : 0;
   chart.options.scales.x.max = Math.max(2 * state.profile.duration_s, maxPtX);
   chart.options.scales.y.max = Math.round(state.profile.setpoint_mA * 1.3);
-}
-
-// ---- State colors: per-point background based on phase/threshold --------
-
-function computePointColors(samples, result) {
-  const hints = result.overlayHints || {};
-  const rampEnd = hints.rampReachedAt_s ?? hints.rampDeadline_s ?? null;
-
-  // Color by violation intervals so glitch-forgiven samples aren't marked as bad.
-  const nonSummary = (result.violations || []).filter(v => !v.isSummary);
-  const errorVios  = nonSummary.filter(v => v.severity === 'error');
-  const warnVios   = nonSummary.filter(v => v.severity === 'warn');
-  const forgiven   = hints.glitchForgivenIntervals || [];
-
-  return samples.map((pt) => {
-    const t = pt.x;
-
-    // Blue: sample that triggered ramp detection
-    if (hints.rampStart_s != null && Math.abs(t - hints.rampStart_s) < 0.001)
-      return 'rgba(33, 150, 243, 0.9)';
-
-    // Blue: first sample to cross target current (ramp success)
-    if (hints.rampReachedAt_s != null && Math.abs(t - hints.rampReachedAt_s) < 0.001)
-      return 'rgba(33, 150, 243, 0.9)';
-
-    // Gray: after stunning goal reached
-    if (hints.completedAt_s != null && t >= hints.completedAt_s)
-      return 'rgba(160, 160, 160, 0.75)';
-
-    // Gray: before/during ramp — no sustain step watching these
-    if (rampEnd != null && t <= rampEnd)
-      return 'rgba(160, 160, 160, 0.75)';
-
-    // Cyan: glitch-forgiven dip samples (checked before violation coloring)
-    if (forgiven.some(iv => t >= iv.tStart_s && t <= iv.tEnd_s))
-      return 'rgba(0, 188, 212, 0.85)';
-
-    // Color matches what the evaluation engine actually flagged (respects glitch filter).
-    if (errorVios.some(v => t >= v.tStart_s && t <= v.tEnd_s)) return 'rgba(220, 53, 69, 0.9)';
-    if (warnVios.some(v  => t >= v.tStart_s && t <= v.tEnd_s)) return 'rgba(255, 193, 7, 0.9)';
-    return 'rgba(76, 175, 80, 0.9)';
-  });
 }
 
 // ---- Re-evaluate and update UI -----------------------------------------
@@ -370,6 +318,21 @@ const chart = new Chart(canvas, {
 // The chart-wrap container drives the size through CSS flex layout.
 window.addEventListener('resize', () => chart.resize());
 
+// ---- Chart theme colors ------------------------------------------------
+
+function setChartTheme(dark) {
+  const tickColor  = dark ? '#888888' : '#666666';
+  const gridColor  = dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)';
+  const titleColor = dark ? '#888888' : '#666666';
+  const s = chart.options.scales;
+  s.x.ticks.color = s.y.ticks.color = tickColor;
+  s.x.grid.color  = s.y.grid.color  = gridColor;
+  s.x.title.color = s.y.title.color = titleColor;
+  chart.update('none');
+}
+
+setChartTheme(getIsDark());
+
 // Drop sample selection when the pointer goes down outside the chart canvas (sidebar, hint, etc.).
 document.addEventListener(
   'pointerdown',
@@ -397,6 +360,77 @@ const algoEditor = createAlgoEditor((updatedSpec) => {
 });
 
 elBtnEditAlgo.addEventListener('click', () => algoEditor.open(getCurrentSpec()));
+
+// ---- Burger menu -------------------------------------------------------
+
+const burgerMenu = createBurgerMenu({
+  curves: CURVES,
+  getCurveId: () => state.curveId,
+  getIsDark,
+  onToggleTheme: () => {
+    toggleTheme();
+    setChartTheme(getIsDark());
+  },
+  onCurveChange: (id) => {
+    state.curveId = id;
+    loadCurve(id);
+  },
+  onReset: () => {
+    sampleEditor.clearSelection();
+    chart.data.datasets[0].data = curvePoints(state.curveId);
+    chart.update('none');
+    reEvaluate();
+  },
+  onSaveCurve: (addCurveOption) => {
+    const raw = prompt('Curve name (will be used as filename):', 'my_curve');
+    if (!raw?.trim()) return;
+    const name     = raw.trim();
+    const id       = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, '');
+    const filename = `${id || 'curve'}.json`;
+    const points   = chart.data.datasets[0].data.map(p => ({ ms: Math.round(p.x * 1000), mA: p.y }));
+    const profile  = { duration_ms: Math.round(state.profile.duration_s * 1000), setpoint_mA: state.profile.setpoint_mA, nominal_mA: state.profile.nominal_mA };
+    const curveObj = { version: '1.0', description: name, profile, samples: points };
+    const blob = new Blob([JSON.stringify(curveObj, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    const effectiveId = id || 'curve';
+    CURVES[effectiveId] = { name, data: points, meta: profile };
+    addCurveOption(effectiveId, name);
+    state.curveId = effectiveId;
+  },
+  onCopy: () => {
+    const samples = chart.data.datasets[0].data;
+    const curveObj = {
+      version:     '1.0',
+      description: CURVES[state.curveId]?.name ?? 'curve',
+      profile: { duration_ms: Math.round(state.profile.duration_s * 1000), setpoint_mA: state.profile.setpoint_mA, nominal_mA: state.profile.nominal_mA },
+      samples: samples.map(p => ({ ms: Math.round(p.x * 1000), mA: p.y }))
+    };
+    navigator.clipboard.writeText(JSON.stringify(curveObj, null, 2)).catch(console.error);
+  },
+  onPaste: () => pasteCurveFromClipboard(),
+  onCopyBitmap: () => {
+    canvas.toBlob(async (blob) => {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      } catch (err) {
+        console.error('[BurgerMenu] Copy bitmap failed:', err);
+      }
+    });
+  },
+  onClear: () => {
+    sampleEditor.clearSelection();
+    chart.data.datasets[0].data = [];
+    chart.update('none');
+    reEvaluate();
+  },
+});
+
+document.getElementById('burger-menu-root').appendChild(burgerMenu.root);
 
 // ---- Profile input handlers --------------------------------------------
 
@@ -439,52 +473,6 @@ function loadCurve(id) {
   reEvaluate();
 }
 
-elCurveSelect.addEventListener('change', () => {
-  state.curveId = elCurveSelect.value;
-  loadCurve(state.curveId);
-});
-
-elBtnSaveCurve.addEventListener('click', () => {
-  const raw = prompt('Curve name (will be used as filename):', 'my_curve');
-  if (!raw?.trim()) return;
-  const name     = raw.trim();
-  const id       = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, '');
-  const filename = `${id || 'curve'}.json`;
-  const points  = chart.data.datasets[0].data.map(p => ({ ms: Math.round(p.x * 1000), mA: p.y }));
-  const profile = { duration_ms: Math.round(state.profile.duration_s * 1000), setpoint_mA: state.profile.setpoint_mA, nominal_mA: state.profile.nominal_mA };
-  const curveObj = { version: '1.0', description: name, profile, samples: points };
-
-  // Download so the user can drop it into curves/
-  const blob = new Blob([JSON.stringify(curveObj, null, 2)], { type: 'application/json' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-
-  // Add to in-memory registry + dropdown for this session
-  const effectiveId = id || 'curve';
-  CURVES[effectiveId] = { name, data: points, meta: profile };
-  if (!elCurveSelect.querySelector(`option[value="${effectiveId}"]`)) {
-    const opt       = document.createElement('option');
-    opt.value       = effectiveId;
-    opt.textContent = name;
-    elCurveSelect.appendChild(opt);
-  }
-  elCurveSelect.value = effectiveId;
-  state.curveId       = effectiveId;
-});
-
-// ---- Action buttons ----------------------------------------------------
-
-elBtnReset.addEventListener('click', () => {
-  sampleEditor.clearSelection();
-  chart.data.datasets[0].data = curvePoints(state.curveId);
-  chart.update('none');
-  reEvaluate();
-});
-
 // ---- Clipboard helpers -------------------------------------------------
 
 function samplesFromClipboardText(text) {
@@ -510,27 +498,7 @@ function samplesFromClipboardText(text) {
   }
 }
 
-elBtnCopy.addEventListener('click', () => {
-  const samples = chart.data.datasets[0].data;
-  const curveObj = {
-    version:     '1.0',
-    description: CURVES[state.curveId]?.name ?? 'curve',
-    profile: { duration_ms: Math.round(state.profile.duration_s * 1000), setpoint_mA: state.profile.setpoint_mA, nominal_mA: state.profile.nominal_mA },
-    samples: samples.map(p => ({ ms: Math.round(p.x * 1000), mA: p.y }))
-  };
-  const text = JSON.stringify(curveObj, null, 2);
-  navigator.clipboard.writeText(text).then(() => {
-    const prev = elBtnCopy.textContent;
-    elBtnCopy.textContent = 'Copied!';
-    setTimeout(() => { elBtnCopy.textContent = prev; }, 1200);
-  });
-});
-
-document.addEventListener('keydown', async (e) => {
-  if (!e.ctrlKey || e.key !== 'v') return;
-  // Don't intercept paste into text inputs
-  if (document.activeElement?.matches('input, select, textarea')) return;
-  e.preventDefault();
+async function pasteCurveFromClipboard() {
   const text = await navigator.clipboard.readText().catch(() => null);
   if (!text) return;
   const parsed = samplesFromClipboardText(text);
@@ -540,13 +508,13 @@ document.addEventListener('keydown', async (e) => {
   chart.data.datasets[0].data = parsed.samples;
   chart.update('none');
   reEvaluate();
-});
+}
 
-elBtnClear.addEventListener('click', () => {
-  sampleEditor.clearSelection();
-  chart.data.datasets[0].data = [];
-  chart.update('none');
-  reEvaluate();
+document.addEventListener('keydown', async (e) => {
+  if (!e.ctrlKey || e.key !== 'v') return;
+  if (document.activeElement?.matches('input, select, textarea')) return;
+  e.preventDefault();
+  pasteCurveFromClipboard();
 });
 
 // ---- Badge click → log violations to console --------------------------

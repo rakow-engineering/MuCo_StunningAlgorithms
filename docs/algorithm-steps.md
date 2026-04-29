@@ -42,13 +42,11 @@ log entry that is being evaluated.
 
 Steps that reference a current level use one of these symbolic names:
 
-| Reference name           | Resolves to                        |
-|--------------------------|------------------------------------|
-| `nominal_mA`             | Threshold A (minimum current)      |
-| `setpoint_mA`            | Threshold B (target current)       |
-| `min_nominal_setpoint`   | `min(nominal_mA, setpoint_mA)`     |
+| Reference name  | Resolves to                   |
+|-----------------|-------------------------------|
+| `nominal_mA`    | Threshold A (minimum current) |
+| `setpoint_mA`   | Threshold B (target current)  |
 
-TODO --> `min(nominal_mA, setpoint_mA)` hast to be removed, setpoint must never be below nominal, so the min value is always nominal if this if this info is needed!!1
 An integer can also be used directly (fixed mA value, rarely needed).
 
 ---
@@ -57,12 +55,12 @@ An integer can also be used directly (fixed mA value, rarely needed).
 
 Each step has a `type` field that determines when it runs:
 
-| Type         | Runs during        | Typical ops                          |
-|--------------|--------------------|--------------------------------------|
-| `filter`     | Post-processing    | `glitch_ignore`                      |
-| `startup`    | Sample loop first  | `ramp_to_threshold`                  |
-| `monitor`    | Sample loop second | `sustain_thresholds`                 |
-| `completion` | Sample loop third  | `min_duration_above`, `charge_integral`, `invalid_timeout`, `total_timeout` |
+| Type         | Runs during          | Typical ops                          |
+|--------------|----------------------|--------------------------------------|
+| `filter`     | Sample loop (first)  | `glitch_ignore`                      |
+| `startup`    | Sample loop (second) | `ramp_to_threshold`                  |
+| `monitor`    | Sample loop (third)  | `sustain_thresholds`                 |
+| `completion` | Sample loop (fourth) | `min_duration_above`, `charge_integral`, `invalid_timeout`, `total_timeout` |
 
 Steps with `"enabled": false` are ignored completely.
 
@@ -72,27 +70,32 @@ Steps with `"enabled": false` are ignored completely.
 
 ---
 
-### `glitch_ignore` 
+### `glitch_ignore`
 
 **Category:** `filter`
 
-TODO: This filter works on sample-level, not on evaluation result processing level
-if a value is below the setpoint, and the next sample is above within the  max_gap_ms time, the value is regared as if it was not under the setpoint. 
+Runs at the start of every sample iteration — before all other step types — and
+decides whether a violating sample should be treated as non-violating by the
+downstream monitor and completion steps.
 
-So the glitch filter thread short undercuts if the are short enough as if the not were present. 
-the level where it is regarded as undercut ist the setpoint level.
+The filter queries each registered monitor/completion handler's own `isViolating(I)`
+method to determine whether the current sample would constitute a violation. If it
+would, the filter measures how long the violation run has been going on (from the
+timestamp of the **first** violating sample in the run). While that duration is
+less than `max_gap_ms`, the sample is **forgiven**: its effective current is raised
+to the highest threshold among the handlers that flagged it, so every downstream
+step sees the sample as just barely passing. Once the run exceeds `max_gap_ms`,
+forgiving stops and the real current value is passed through.
 
-If we receive values every 100ms, and the max_gap is also 100ms, how should this work. 
-If a value is below setpoint, its timestamp is taken. 
-If the next value is above the setpoint, with a timestamp diff <= max_gab, the first value is handled (end internally forwarded, as if it was on level of the setpoint. 
-
-This can be viualized with a no-filled grad dot in the chart-overly.
+When the violation run ends (the next sample is clean), the forgiven interval
+`[tStart, tEnd]` is recorded and made available as an overlay hint for
+visualisation.
 
 #### Parameters
 
-| Parameter    | Type | Default | Description                                                       |
-|--------------|------|---------|-------------------------------------------------------------------|
-| `max_gap_ms` | int  | `100`   | Violations shorter than this (in ms) are silently removed         |
+| Parameter    | Type | Default | Description                                                                     |
+|--------------|------|---------|---------------------------------------------------------------------------------|
+| `max_gap_ms` | int  | `100`   | Maximum duration of a violation run that is silently forgiven (milliseconds)    |
 
 #### Example
 
@@ -106,9 +109,17 @@ This can be viualized with a no-filled grad dot in the chart-overly.
 }
 ```
 
-#### Effect on values for other algorithm-steps: 
+#### Effect on downstream steps
 
-- Setpoint violations shorter than `max_gap_ms` are handled as if the were = setpoint 
+- During a forgiven run, `runtimeCtx.effectiveI` is set to `max(thresholds of
+  violating handlers)` — i.e. the highest threshold that the sample undercut.
+  All monitor and completion steps read `effectiveI` instead of `sample.I`, so
+  they see the sample as borderline-passing and generate no violation for it.
+- After `max_gap_ms` is exceeded, `effectiveI = sample.I` and the violation is
+  treated normally.
+- Forgiven intervals are stored in `overlayHints.glitchForgivenIntervals` and
+  visualised as cyan bands in the chart, with hollow cyan markers at the start
+  and end of each forgiven run.
 
 ### `ramp_to_threshold` — startup current ramp check
 
@@ -360,9 +371,11 @@ order before returning the result:
    `completedAt_s` are removed or clipped to end at `completedAt_s`.
 2. **Warn suppression** — warn violations fully covered by an error violation
    interval are removed (the error already represents the worst-case condition).
-3. **Glitch filter** — if a `glitch_ignore` step is enabled, any remaining
-   non-summary violation shorter than `max_gap_ms` is removed and its interval
-   is stored in `glitchForgivenIntervals` for overlay visualization.
+
+The `glitch_ignore` filter acts **before** these passes, at the sample level
+during evaluation. By the time post-processing runs, forgiven samples have
+already been substituted with their effective current values and produce no
+violations at all.
 
 ---
 

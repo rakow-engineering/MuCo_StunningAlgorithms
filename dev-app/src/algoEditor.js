@@ -51,7 +51,7 @@ const STEP_DEFAULTS = {
   },
   glitch_ignore: {
     id: 'glitch', op: 'glitch_ignore', type: 'filter', enabled: false,
-    ref: 'nominal_mA', max_gap_ms: 100,
+    max_gap_ms: 100,
   },
   sustain_thresholds: {
     id: 'sustain', op: 'sustain_thresholds', type: 'monitor', enabled: false,
@@ -93,7 +93,6 @@ const OP_STEP_DEFAULTS = {
     count_during_ramp:         false,
   },
   glitch_ignore: {
-    ref:        'nominal_mA',
     max_gap_ms: 100,
   },
   sustain_thresholds: {
@@ -169,8 +168,7 @@ function stepFields(op) {
       ];
     case 'glitch_ignore':
       return [
-        { key: 'ref',        label: 'Reference level', type: 'binding', options: CURRENT_BINDINGS },
-        { key: 'max_gap_ms', label: 'Max gap',         type: 'int',     min: 0, unit: 'ms' },
+        { key: 'max_gap_ms', label: 'Max gap', type: 'int', min: 0, unit: 'ms' },
       ];
     case 'sustain_thresholds':
       return [

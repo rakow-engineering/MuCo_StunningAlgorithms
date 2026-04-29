@@ -90,50 +90,119 @@ export function normalizeMeasurements(logEntry) {
 // ---------------------------------------------------------------------------
 
 /**
- * glitch_ignore — forgive sub-nominal dips shorter than max_gap_ms.
+ * glitch_ignore — sample-level filter driven by monitor-handler thresholds.
  *
- * Sets runtimeCtx.effectiveI for each sample:
- *   - If a dip is shorter than max_gap_ms: effectiveI = pre-dip hold value.
- *   - Otherwise: effectiveI = actual sample current.
+ * Two-mode operation:
  *
- * All downstream steps (sustain_thresholds, min_duration_above, charge_integral)
- * read effectiveI so that forgiven dips are treated as if they never occurred.
- * The evaluation loop also tracks runtimeCtx.prevEffectiveI (the previous sample's
- * effective value) so completion steps can correctly handle the inter-sample interval
- * around a glitch boundary.
+ * Batch mode (evaluate): preprocess() is called with the full sample array
+ * before the sample loop. It scans for violation runs and marks each run as
+ * forgiven only if its TOTAL duration (first-violating to first-clean) is less
+ * than max_gap_ms. All-or-nothing: a run that turns out too long is not forgiven
+ * at all, not even its leading portion.
+ *
+ * Streaming mode (createSession): preprocess() is never called. The greedy
+ * approach is used instead — samples are forgiven while the run is within the
+ * window. Limitation: the leading max_gap_ms of a long run will be forgiven
+ * before the run is known to be too long.
+ *
+ * In both modes, runtimeCtx.effectiveI is raised to the highest threshold of
+ * the violating handlers so all downstream steps see the sample as just-passing.
+ *
+ * Forgiven intervals are collected and returned in meta.glitchForgivenIntervals.
  */
-function createGlitchIgnoreHandler(step, A, B) {
-  const threshold = resolveThreshold(step.ref, A, B);
-  const maxGapS   = (step.max_gap_ms ?? 100) / 1000;
+function createGlitchIgnoreHandler(step) {
+  const maxGapS = (step.max_gap_ms ?? 100) / 1000;
 
-  let glitchActive = false;
-  let glitchStartT = null;
-  let glitchHoldI  = 0;
+  let monitorHandlers = [];
   const forgivenIntervals = [];
+  let preprocessed = false;
+
+  // Streaming fallback state (used when preprocess() was not called)
+  let streamRunStart = null;
+  let streamForgiving = false;
 
   return {
-    update(sample, prevSample, runtimeCtx) {
-      if (sample.I < threshold) {
-        if (!glitchActive) {
-          glitchActive = true;
-          glitchStartT = sample.t;
-          glitchHoldI  = prevSample != null ? prevSample.I : threshold;
-        }
-        const gap = sample.t - glitchStartT;
-        runtimeCtx.effectiveI = gap < maxGapS ? glitchHoldI : sample.I;
-      } else {
-        if (glitchActive) {
-          const gapDuration = sample.t - glitchStartT;
-          if (gapDuration < maxGapS) {
-            forgivenIntervals.push({ tStart_s: glitchStartT, tEnd_s: sample.t });
+    setMonitorHandlers(handlers) {
+      monitorHandlers = handlers;
+    },
+
+    /**
+     * Batch pre-pass: scan all samples and build forgivenIntervals so that
+     * only runs whose total duration (first-violating to first-clean) is less
+     * than max_gap_ms are forgiven. Called by evaluate() before the sample loop.
+     * This is all-or-nothing per run — the greedy streaming path is not used.
+     */
+    preprocess(samples) {
+      if (monitorHandlers.length === 0) return;
+      preprocessed = true;
+
+      let runStart = null;
+      for (const s of samples) {
+        const isViol = monitorHandlers.some(h => h.isViolating(s.I));
+        if (isViol) {
+          if (runStart === null) runStart = s.t;
+        } else {
+          if (runStart !== null) {
+            if (s.t - runStart < maxGapS) {
+              forgivenIntervals.push({ tStart_s: runStart, tEnd_s: s.t });
+            }
+            runStart = null;
           }
         }
-        glitchActive = false;
-        glitchStartT = null;
+      }
+      // Open run at end of recording: no clean sample seen → gap unknown → don't forgive.
+    },
+
+    update(sample, _prevSample, runtimeCtx) {
+      if (monitorHandlers.length === 0) {
         runtimeCtx.effectiveI = sample.I;
+        return;
+      }
+
+      if (preprocessed) {
+        // Batch mode: use pre-computed forgiven intervals (all-or-nothing per run)
+        const inForgiven = forgivenIntervals.some(
+          iv => sample.t >= iv.tStart_s && sample.t < iv.tEnd_s
+        );
+        if (inForgiven) {
+          const violating = monitorHandlers.filter(h => h.isViolating(sample.I));
+          const thresholds = violating.map(h => h.getThreshold()).filter(t => t != null);
+          runtimeCtx.effectiveI = thresholds.length > 0 ? Math.max(...thresholds) : sample.I;
+        } else {
+          runtimeCtx.effectiveI = sample.I;
+        }
+      } else {
+        // Streaming mode: greedy — forgive while gap from run-start < max_gap_ms.
+        // Inherent limitation: the first max_gap_ms of any long run is forgiven.
+        const violating = monitorHandlers.filter(h => h.isViolating(sample.I));
+        if (violating.length === 0) {
+          if (streamRunStart !== null && streamForgiving) {
+            forgivenIntervals.push({ tStart_s: streamRunStart, tEnd_s: sample.t });
+          }
+          streamRunStart = null;
+          streamForgiving = false;
+          runtimeCtx.effectiveI = sample.I;
+        } else {
+          if (streamRunStart === null) streamRunStart = sample.t;
+          const gap = sample.t - streamRunStart;
+          if (gap < maxGapS) {
+            const thresholds = violating.map(h => h.getThreshold()).filter(t => t != null);
+            runtimeCtx.effectiveI = thresholds.length > 0 ? Math.max(...thresholds) : sample.I;
+            streamForgiving = true;
+          } else {
+            streamForgiving = false;
+            runtimeCtx.effectiveI = sample.I;
+          }
+        }
       }
     },
-    finalize() { return { violations: [], meta: { glitchForgivenIntervals: forgivenIntervals } }; }
+
+    finalize(lastSample) {
+      if (!preprocessed && streamRunStart !== null && streamForgiving && lastSample != null) {
+        forgivenIntervals.push({ tStart_s: streamRunStart, tEnd_s: lastSample.t });
+      }
+      return { violations: [], meta: { glitchForgivenIntervals: forgivenIntervals } };
+    }
   };
 }
 
@@ -240,11 +309,11 @@ function createRampHandler(step, A, B) {
 }
 
 /**
- * sustain_thresholds — continuous zone classification using effectiveI.
+ * sustain_thresholds — continuous zone classification using raw sample current.
  *
  * Does not start until after the ramp deadline (or immediately when no
- * ramp step is configured). Uses runtimeCtx.effectiveI (set by glitch_ignore)
- * so short dips are forgiven for zone and violation purposes.
+ * ramp step is configured). Short dips are handled in _finalizeHandlers by the
+ * glitch_ignore post-filter, not here.
  *
  * Updates runtimeCtx.ok_s / warn_s / invalid_s each sample for
  * invalid_timeout to read.
@@ -289,15 +358,15 @@ function createSustainHandler(step, A, B) {
 
       if (runtimeCtx.completedAt_s != null && sample.t > runtimeCtx.completedAt_s) return;
 
-      const effectiveI = runtimeCtx.effectiveI ?? sample.I;
+      const I = runtimeCtx.effectiveI ?? sample.I;
       const dt = sample.t - prevT;
       prevT = sample.t;
 
       // Zone time accumulation
       if (dt > 0) {
-        if (failBelow !== null && effectiveI < failBelow) {
+        if (failBelow !== null && I < failBelow) {
           invalid_s += dt;
-        } else if (warnBelow !== null && effectiveI < warnBelow) {
+        } else if (warnBelow !== null && I < warnBelow) {
           warn_s += dt;
         } else {
           ok_s += dt;
@@ -306,7 +375,7 @@ function createSustainHandler(step, A, B) {
 
       // Fail-zone violation
       if (failBelow !== null) {
-        if (effectiveI < failBelow) {
+        if (I < failBelow) {
           if (failStart === null) failStart = sample.t;
         } else if (failStart !== null) {
           violations.push({
@@ -321,8 +390,8 @@ function createSustainHandler(step, A, B) {
 
       // Warn-zone violation (only while above fail threshold)
       if (warnBelow !== null) {
-        const aboveFail = failBelow === null || effectiveI >= failBelow;
-        if (effectiveI < warnBelow && aboveFail) {
+        const aboveFail = failBelow === null || I >= failBelow;
+        if (I < warnBelow && aboveFail) {
           if (warnStart === null) warnStart = sample.t;
         } else if (warnStart !== null) {
           violations.push({
@@ -372,6 +441,15 @@ function createSustainHandler(step, A, B) {
       }
 
       return { violations, meta: { ok_s, warn_s, invalid_s } };
+    },
+
+    // Used by glitch_ignore to detect violation-level samples without side effects.
+    isViolating(I) {
+      return (failBelow !== null && I < failBelow) || (warnBelow !== null && I < warnBelow);
+    },
+    // Highest threshold this handler monitors — glitch_ignore raises effectiveI to this.
+    getThreshold() {
+      return warnBelow ?? failBelow;
     }
   };
 }
@@ -407,7 +485,6 @@ function createDurationHandler(step, A, B, bindings, logEntry) {
       if (completedAt_s !== null) return;
 
       const violationGuardStart = runtimeCtx.rampDeadline_s ?? 0;
-      // Use effective current so glitch-forgiven dips don't interrupt duration counting.
       const curI  = runtimeCtx.effectiveI     ?? sample.I;
       const prevI = runtimeCtx.prevEffectiveI ?? prevSample.I;
       const bothAbove = curI >= threshold && prevI >= threshold;
@@ -485,7 +562,10 @@ function createDurationHandler(step, A, B, bindings, logEntry) {
           stunning_accumulate_start_s: accumulateStart
         }
       };
-    }
+    },
+
+    isViolating(I) { return I < threshold; },
+    getThreshold()  { return threshold; }
   };
 }
 
@@ -526,7 +606,6 @@ function createIntegralHandler(step, A, B, bindings, logEntry) {
       const violationGuardStart = runtimeCtx.rampDeadline_s ?? 0;
       const dtStart = Math.max(prevSample.t, accumulateStart);
       const dt  = sample.t - dtStart;
-      // Use effective current so glitch-forgiven dips don't break integral accumulation.
       const I0  = runtimeCtx.prevEffectiveI ?? prevSample.I;
       const I1  = runtimeCtx.effectiveI     ?? sample.I;
       const eff0 = I0 >= cutoff ? Math.min(I0, limitValue) : 0;
@@ -547,7 +626,6 @@ function createIntegralHandler(step, A, B, bindings, logEntry) {
         runtimeCtx.completedAt_s = completedAt_s;
       }
 
-      // Cutoff-zone violation tracking
       const isBelowCutoff = I1 < cutoff;
       if (isBelowCutoff && completedAt_s === null) {
         if (deadStart === null && sample.t > violationGuardStart) {
@@ -604,7 +682,10 @@ function createIntegralHandler(step, A, B, bindings, logEntry) {
           stunning_accumulate_start_s: accumulateStart
         }
       };
-    }
+    },
+
+    isViolating(I) { return I < cutoff; },
+    getThreshold()  { return cutoff; }
   };
 }
 
@@ -719,8 +800,8 @@ function createHandler(step, A, B, bindings, logEntry) {
 }
 
 // ---------------------------------------------------------------------------
-// Step type processing order: filter must run before startup/monitor/completion
-// so that effectiveI is set before any step reads it.
+// Step type processing order: filter, startup, monitor, completion.
+// (glitch_ignore's update() is a no-op; order is preserved for future use.)
 // ---------------------------------------------------------------------------
 
 const STEP_TYPE_ORDER = { filter: 0, startup: 1, monitor: 2, completion: 3 };
@@ -851,6 +932,23 @@ export {
 };
 
 // ---------------------------------------------------------------------------
+// Handler wiring — called after all handlers are created so glitch_ignore
+// can query monitor/completion handlers via isViolating / getThreshold.
+// ---------------------------------------------------------------------------
+
+function _wireHandlers(handlers) {
+  const monitors = handlers
+    .filter(h => typeof h.handler.isViolating === 'function')
+    .map(h => h.handler);
+  if (!monitors.length) return;
+  for (const { handler } of handlers) {
+    if (typeof handler.setMonitorHandlers === 'function') {
+      handler.setMonitorHandlers(monitors);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API — batch evaluation
 // ---------------------------------------------------------------------------
 
@@ -879,6 +977,13 @@ export function evaluate(logEntry, spec) {
     .filter(step => step.enabled !== false)
     .sort((a, b) => (STEP_TYPE_ORDER[a.type] ?? 99) - (STEP_TYPE_ORDER[b.type] ?? 99))
     .map(step => ({ step, handler: createHandler(step, A, B, bindings, logEntry) }));
+  _wireHandlers(handlers);
+
+  // Batch pre-pass: let the glitch filter scan all samples before the main loop
+  // so it can apply all-or-nothing forgiving (not just the leading max_gap_ms).
+  for (const { handler } of handlers) {
+    if (typeof handler.preprocess === 'function') handler.preprocess(points);
+  }
 
   let prevSample = null;
   for (const sample of points) {
@@ -923,6 +1028,7 @@ export function createSession(spec, logEntryMeta) {
     .filter(step => step.enabled !== false)
     .sort((a, b) => (STEP_TYPE_ORDER[a.type] ?? 99) - (STEP_TYPE_ORDER[b.type] ?? 99))
     .map(step => ({ step, handler: createHandler(step, A, B, bindings, logEntryMeta) }));
+  _wireHandlers(handlers);
 
   let prevSample = null;
   let finished   = false;

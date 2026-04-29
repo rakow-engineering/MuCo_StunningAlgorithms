@@ -16,7 +16,6 @@
       "op": "glitch_ignore",
       "type": "filter",
       "enabled": true,
-      "ref": "nominal_mA",
       "max_gap_ms": 100
     },
     {

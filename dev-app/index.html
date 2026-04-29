@@ -9,9 +9,11 @@
   <meta name="theme-color" content="#0f3460" />
   <link rel="manifest" href="manifest.json" />
   <title>Stunning Algorithm Workbench</title>
+  <script>try{var t=localStorage.getItem('workbench-theme');document.documentElement.setAttribute('data-theme',t==='light'?'light':'dark');}catch(e){}</script>
 </head>
 <body>
   <header>
+    <div id="burger-menu-root"></div>
     <h1>Stunning Algorithm Workbench</h1>
     <div class="header-algo">
       <span>Algorithm</span>
@@ -50,19 +52,6 @@
           <input type="checkbox" id="show-state-colors" checked style="width:auto; margin:0" />
           <span style="color:var(--text-dim); font-size:11px">State colors</span>
         </label>
-      </div>
-
-      <!-- Curves -->
-      <div class="panel">
-        <div class="panel-title">Curves</div>
-        <label>
-          <span>Active curve</span>
-          <select id="curve-select"></select>
-        </label>
-        <button class="btn" id="btn-reset">Reset curve</button>
-        <button class="btn" id="btn-save-curve">Save curve…</button>
-        <button class="btn" id="btn-copy">Copy curve</button>
-        <button class="btn" id="btn-clear">Clear all</button>
       </div>
 
       <!-- Results -->
